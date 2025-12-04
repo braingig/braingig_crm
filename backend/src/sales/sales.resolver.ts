@@ -2,12 +2,14 @@ import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { SalesService } from './sales.service';
 import { GqlAuthGuard } from '../auth/guards/gql-auth.guard';
+import { Sale } from './entities/sale.entity';
+import { CreateSaleInput } from './dto/sales.dto';
 
-@Resolver()
+@Resolver(() => Sale)
 export class SalesResolver {
     constructor(private salesService: SalesService) { }
 
-    @Query(() => [Object])
+    @Query(() => [Sale])
     @UseGuards(GqlAuthGuard)
     async sales(
         @Args('assignedToId', { nullable: true }) assignedToId?: string,
@@ -15,9 +17,11 @@ export class SalesResolver {
         return this.salesService.findAll({ assignedToId });
     }
 
-    @Mutation(() => Object)
+    @Mutation(() => Sale)
     @UseGuards(GqlAuthGuard)
-    async createSale(@Args('input') input: any) {
+    async createSale(
+        @Args('input', { type: () => CreateSaleInput }) input: CreateSaleInput,
+    ) {
         return this.salesService.create(input);
     }
 }

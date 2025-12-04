@@ -2,6 +2,7 @@ import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
 import { UseGuards } from '@nestjs/common';
 import { PayrollService } from './payroll.service';
 import { GqlAuthGuard } from '../auth/guards/gql-auth.guard';
+import { Payroll } from './entities/payroll.entity';
 
 @Resolver()
 export class PayrollResolver {
@@ -17,7 +18,7 @@ export class PayrollResolver {
         return true;
     }
 
-    @Query(() => [Object])
+    @Query(() => [Payroll])
     @UseGuards(GqlAuthGuard)
     async payrolls(
         @Args('employeeId', { nullable: true }) employeeId?: string,

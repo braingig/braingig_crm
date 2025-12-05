@@ -1,13 +1,54 @@
 'use client';
 
 import { useQuery, useMutation } from '@apollo/client';
-import { GET_ACTIVE_TIME_ENTRY, GET_TODAY_TIMESHEET, CHECK_IN, CHECK_OUT, START_TIME_ENTRY, STOP_TIME_ENTRY } from '@/lib/graphql/queries';
+import { GET_ACTIVE_TIME_ENTRY, GET_TODAY_TIMESHEET, GET_TIME_ENTRIES, GET_TIMESHEETS, CHECK_IN, CHECK_OUT, START_TIME_ENTRY, STOP_TIME_ENTRY } from '@/lib/graphql/queries';
 import { useState, useEffect } from 'react';
 import { ClockIcon, PlayIcon, StopIcon } from '@heroicons/react/24/outline';
 
 export default function TimeTrackerPage() {
     const { data: activeEntryData, refetch: refetchActiveEntry } = useQuery(GET_ACTIVE_TIME_ENTRY);
     const { data: todayTimesheetData, refetch: refetchTodayTimesheet } = useQuery(GET_TODAY_TIMESHEET);
+    const { data: timeEntriesData, refetch: refetchTimeEntries } = useQuery(GET_TIME_ENTRIES);
+
+    // Calculate date ranges for week and month
+    const getWeekStart = () => {
+        const now = new Date();
+        const dayOfWeek = now.getDay();
+        const diff = now.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1); // Adjust for Sunday
+        return new Date(now.setDate(diff));
+    };
+
+    const getWeekEnd = () => {
+        const weekStart = getWeekStart();
+        return new Date(weekStart.setDate(weekStart.getDate() + 6));
+    };
+
+    const getMonthStart = () => {
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth(), 1);
+    };
+
+    const getMonthEnd = () => {
+        const now = new Date();
+        return new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    };
+
+    // Queries for week and month timesheets
+    const { data: weekTimesheetsData } = useQuery(GET_TIMESHEETS, {
+        variables: {
+            startDate: getWeekStart(),
+            endDate: getWeekEnd()
+        },
+        skip: false
+    });
+
+    const { data: monthTimesheetsData } = useQuery(GET_TIMESHEETS, {
+        variables: {
+            startDate: getMonthStart(),
+            endDate: getMonthEnd()
+        },
+        skip: false
+    });
     const [checkIn] = useMutation(CHECK_IN, { onCompleted: () => {
         refetchActiveEntry();
         refetchTodayTimesheet();
@@ -16,8 +57,14 @@ export default function TimeTrackerPage() {
         refetchActiveEntry();
         refetchTodayTimesheet();
     }});
-    const [startTimer] = useMutation(START_TIME_ENTRY, { onCompleted: () => refetchActiveEntry() });
-    const [stopTimer] = useMutation(STOP_TIME_ENTRY, { onCompleted: () => refetchActiveEntry() });
+    const [startTimer] = useMutation(START_TIME_ENTRY, { onCompleted: () => {
+        refetchActiveEntry();
+        refetchTimeEntries();
+    }});
+    const [stopTimer] = useMutation(STOP_TIME_ENTRY, { onCompleted: () => {
+        refetchActiveEntry();
+        refetchTimeEntries();
+    }});
 
     const [elapsed, setElapsed] = useState(0);
     const activeEntry = activeEntryData?.activeTimeEntry;
@@ -65,6 +112,123 @@ export default function TimeTrackerPage() {
     };
 
     const attendanceStatus = getAttendanceStatus();
+
+    // Calculate today's total time
+    const getTodayTotalTime = () => {
+        let totalSeconds = 0;
+        
+        // Add time from today's timesheet (check-in/check-out)
+        if (todayTimesheet?.totalHours) {
+            totalSeconds += todayTimesheet.totalHours * 3600;
+        }
+        
+        // Add time from today's completed time entries
+        const todayTimeEntries = timeEntriesData?.timeEntries?.filter((entry: any) => {
+            const entryDate = new Date(entry.startTime).toDateString();
+            const today = new Date().toDateString();
+            return entryDate === today;
+        }) || [];
+        
+        todayTimeEntries.forEach((entry: any) => {
+            if (entry.duration) {
+                totalSeconds += entry.duration * 60; // duration is in minutes
+            }
+        });
+        
+        // Add current active timer time
+        if (activeEntry) {
+            totalSeconds += elapsed;
+        }
+        
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        
+        return `${hours}h ${minutes}m`;
+    };
+
+    // Calculate this week's total time
+    const getWeekTotalTime = () => {
+        let totalSeconds = 0;
+        
+        // Add time from week's timesheets
+        const weekTimesheets = weekTimesheetsData?.timesheets || [];
+        weekTimesheets.forEach((timesheet: any) => {
+            if (timesheet.totalHours) {
+                totalSeconds += timesheet.totalHours * 3600;
+            }
+        });
+        
+        // Add time from week's time entries
+        const weekTimeEntries = timeEntriesData?.timeEntries?.filter((entry: any) => {
+            const entryDate = new Date(entry.startTime);
+            const weekStart = getWeekStart();
+            const weekEnd = getWeekEnd();
+            return entryDate >= weekStart && entryDate <= weekEnd;
+        }) || [];
+        
+        weekTimeEntries.forEach((entry: any) => {
+            if (entry.duration) {
+                totalSeconds += entry.duration * 60;
+            }
+        });
+        
+        // Add current active timer if it's this week
+        if (activeEntry) {
+            const entryDate = new Date(activeEntry.startTime);
+            const weekStart = getWeekStart();
+            const weekEnd = getWeekEnd();
+            if (entryDate >= weekStart && entryDate <= weekEnd) {
+                totalSeconds += elapsed;
+            }
+        }
+        
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        
+        return `${hours}h ${minutes}m`;
+    };
+
+    // Calculate this month's total time
+    const getMonthTotalTime = () => {
+        let totalSeconds = 0;
+        
+        // Add time from month's timesheets
+        const monthTimesheets = monthTimesheetsData?.timesheets || [];
+        monthTimesheets.forEach((timesheet: any) => {
+            if (timesheet.totalHours) {
+                totalSeconds += timesheet.totalHours * 3600;
+            }
+        });
+        
+        // Add time from month's time entries
+        const monthTimeEntries = timeEntriesData?.timeEntries?.filter((entry: any) => {
+            const entryDate = new Date(entry.startTime);
+            const monthStart = getMonthStart();
+            const monthEnd = getMonthEnd();
+            return entryDate >= monthStart && entryDate <= monthEnd;
+        }) || [];
+        
+        monthTimeEntries.forEach((entry: any) => {
+            if (entry.duration) {
+                totalSeconds += entry.duration * 60;
+            }
+        });
+        
+        // Add current active timer if it's this month
+        if (activeEntry) {
+            const entryDate = new Date(activeEntry.startTime);
+            const monthStart = getMonthStart();
+            const monthEnd = getMonthEnd();
+            if (entryDate >= monthStart && entryDate <= monthEnd) {
+                totalSeconds += elapsed;
+            }
+        }
+        
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        
+        return `${hours}h ${minutes}m`;
+    };
 
     return (
         <div>
@@ -205,15 +369,15 @@ export default function TimeTrackerPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
                 <div className="card">
                     <p className="text-sm text-gray-600 dark:text-gray-400">Today</p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">0h 0m</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">{getTodayTotalTime()}</p>
                 </div>
                 <div className="card">
                     <p className="text-sm text-gray-600 dark:text-gray-400">This Week</p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">0h 0m</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">{getWeekTotalTime()}</p>
                 </div>
                 <div className="card">
                     <p className="text-sm text-gray-600 dark:text-gray-400">This Month</p>
-                    <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">0h 0m</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">{getMonthTotalTime()}</p>
                 </div>
             </div>
         </div>

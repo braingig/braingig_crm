@@ -191,6 +191,31 @@ export const GET_TODAY_TIMESHEET = gql`
   }
 `;
 
+export const GET_TIME_ENTRIES = gql`
+  query GetTimeEntries($employeeId: String) {
+    timeEntries(employeeId: $employeeId) {
+      id
+      startTime
+      endTime
+      duration
+      description
+    }
+  }
+`;
+
+export const GET_TIMESHEETS = gql`
+  query GetTimesheets($employeeId: String, $startDate: Date, $endDate: Date) {
+    timesheets(employeeId: $employeeId, startDate: $startDate, endDate: $endDate) {
+      id
+      date
+      checkIn
+      checkOut
+      totalHours
+      status
+    }
+  }
+`;
+
 export const UPDATE_USER = gql`
   mutation UpdateUser($id: String!, $input: UpdateUserInput!) {
     updateUser(id: $id, input: $input) {

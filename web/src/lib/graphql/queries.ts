@@ -178,3 +178,26 @@ export const GET_ACTIVE_TIME_ENTRY = gql`
     }
   }
 `;
+
+export const UPDATE_USER = gql`
+  mutation UpdateUser($id: String!, $input: UpdateUserInput!) {
+    updateUser(id: $id, input: $input) {
+      id
+      name
+      email
+      role
+      phone
+      department
+      skills
+      salaryType
+      salaryAmount
+      status
+    }
+  }
+`;
+
+export const DELETE_USER = gql`
+  mutation DeleteUser($id: String!) {
+    deleteUser(id: $id)
+  }
+`;

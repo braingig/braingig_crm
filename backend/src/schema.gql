@@ -142,6 +142,7 @@ type Query {
   tasks(filters: TaskFiltersInput): [TaskType!]!
   timeEntries(employeeId: String, taskId: String): [TimeEntryType!]!
   timesheets(employeeId: String, endDate: DateTime, startDate: DateTime): [TimesheetType!]!
+  todayTimesheet: TimesheetType
   user(id: String!): UserType!
   users(filters: UserFiltersInput): [UserType!]!
 }

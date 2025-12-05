@@ -251,4 +251,25 @@ export class TimesheetsService {
             },
         });
     }
+
+    async getTodayTimesheet(employeeId: string) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        return this.prisma.timesheet.findFirst({
+            where: {
+                employeeId,
+                date: today,
+            },
+            include: {
+                employee: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                    },
+                },
+            },
+        });
+    }
 }

@@ -179,6 +179,18 @@ export const GET_ACTIVE_TIME_ENTRY = gql`
   }
 `;
 
+export const GET_TODAY_TIMESHEET = gql`
+  query GetTodayTimesheet {
+    todayTimesheet {
+      id
+      checkIn
+      checkOut
+      totalHours
+      status
+    }
+  }
+`;
+
 export const UPDATE_USER = gql`
   mutation UpdateUser($id: String!, $input: UpdateUserInput!) {
     updateUser(id: $id, input: $input) {

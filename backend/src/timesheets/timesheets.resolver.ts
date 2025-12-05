@@ -64,4 +64,10 @@ export class TimesheetsResolver {
     async activeTimeEntry(@CurrentUser() user: any) {
         return this.timesheetsService.getActiveTimeEntry(user.userId);
     }
+
+    @Query(() => TimesheetType, { nullable: true })
+    @UseGuards(GqlAuthGuard)
+    async todayTimesheet(@CurrentUser() user: any) {
+        return this.timesheetsService.getTodayTimesheet(user.userId);
+    }
 }

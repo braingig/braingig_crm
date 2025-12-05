@@ -16,6 +16,27 @@ export const LOGIN_MUTATION = gql`
   }
 `;
 
+export const REGISTER_MUTATION = gql`
+  mutation Register($input: RegisterInput!) {
+    register(input: $input) {
+      accessToken
+      refreshToken
+      user {
+        id
+        name
+        email
+        role
+        department
+        phone
+        skills
+        salaryType
+        salaryAmount
+        status
+      }
+    }
+  }
+`;
+
 export const GET_ME = gql`
   query GetMe {
     me {

@@ -1,13 +1,20 @@
 'use client';
 
+import { useState } from 'react';
 import { useQuery } from '@apollo/client';
 import { GET_USERS } from '@/lib/graphql/queries';
 import { UserGroupIcon } from '@heroicons/react/24/outline';
+import AddEmployeeModal from '@/components/AddEmployeeModal';
 
 export default function EmployeesPage() {
-    const { data, loading } = useQuery(GET_USERS);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const { data, loading, refetch } = useQuery(GET_USERS);
 
     const users = data?.users || [];
+
+    const handleEmployeeAdded = () => {
+        refetch();
+    };
 
     return (
         <div>
@@ -18,7 +25,10 @@ export default function EmployeesPage() {
                         Manage your team members and their information
                     </p>
                 </div>
-                <button className="btn-primary">
+                <button 
+                    onClick={() => setIsModalOpen(true)}
+                    className="btn-primary"
+                >
                     <UserGroupIcon className="h-5 w-5 mr-2 inline" />
                     Add Employee
                 </button>
@@ -89,6 +99,12 @@ export default function EmployeesPage() {
                     </div>
                 </div>
             )}
+
+            <AddEmployeeModal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                onEmployeeAdded={handleEmployeeAdded}
+            />
         </div>
     );
 }

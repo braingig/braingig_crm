@@ -23,6 +23,7 @@ input CreateProjectInput {
   hourlyRate: Float
   name: String!
   startDate: DateTime!
+  status: ProjectStatus
 }
 
 input CreateSaleInput {

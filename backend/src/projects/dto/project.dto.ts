@@ -38,6 +38,11 @@ export class CreateProjectInput {
     @IsOptional()
     @IsString()
     clientName?: string;
+
+    @Field(() => ProjectStatus, { nullable: true })
+    @IsOptional()
+    @IsEnum(ProjectStatus)
+    status?: ProjectStatus;
 }
 
 @InputType()

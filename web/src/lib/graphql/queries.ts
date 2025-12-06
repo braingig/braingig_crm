@@ -76,6 +76,7 @@ export const GET_PROJECTS = gql`
       name
       description
       budget
+      hourlyRate
       status
       startDate
       endDate
@@ -95,6 +96,7 @@ export const CREATE_PROJECT = gql`
       id
       name
       budget
+      hourlyRate
       status
     }
   }
@@ -245,5 +247,28 @@ export const REFRESH_TOKEN = gql`
       accessToken
       refreshToken
     }
+  }
+`;
+
+export const UPDATE_PROJECT = gql`
+  mutation UpdateProject($id: String!, $input: UpdateProjectInput!) {
+    updateProject(id: $id, input: $input) {
+      id
+      name
+      description
+      budget
+      hourlyRate
+      status
+      startDate
+      endDate
+      clientName
+      updatedAt
+    }
+  }
+`;
+
+export const DELETE_PROJECT = gql`
+  mutation DeleteProject($id: String!) {
+    deleteProject(id: $id)
   }
 `;

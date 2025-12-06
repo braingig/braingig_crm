@@ -238,3 +238,12 @@ export const DELETE_USER = gql`
     deleteUser(id: $id)
   }
 `;
+
+export const REFRESH_TOKEN = gql`
+  mutation RefreshToken($refreshToken: String!) {
+    refreshToken(refreshToken: $refreshToken) {
+      accessToken
+      refreshToken
+    }
+  }
+`;

@@ -37,12 +37,8 @@ import {
     DragEndEvent,
 } from '@dnd-kit/core';
 import {
-    arrayMove,
-    SortableContext,
-    sortableKeyboardCoordinates,
-    verticalListSortingStrategy,
-    useSortable,
-} from '@dnd-kit/sortable';
+    useDraggable,
+} from '@dnd-kit/core';
 import {
     useDroppable,
 } from '@dnd-kit/core';
@@ -74,13 +70,14 @@ const DraggableTaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: {
         listeners,
         setNodeRef,
         transform,
-        transition,
         isDragging,
-    } = useSortable({ id: task.id });
+    } = useDraggable({
+        id: task.id,
+    });
 
     const style = {
         transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
-        transition,
+        transition: isDragging ? 'none' : 'transform 250ms ease',
         opacity: isDragging ? 0.5 : 1,
     };
 
@@ -264,21 +261,19 @@ const DroppableKanbanColumn = ({
                 </span>
             </div>
             <div 
-                ref={setNodeRef}
-                className={`bg-gray-50 rounded-b-lg border border-t-0 border-gray-200 p-3 min-h-[400px] ${isOver ? 'bg-blue-50' : ''}`}
-            >
-                <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
-                    {tasks.map((task) => (
-                        <DraggableTaskCard
-                            key={task.id}
-                            task={task}
-                            onEdit={onEditTask}
-                            onDelete={onDeleteTask}
-                            onStatusChange={onStatusChange}
-                            users={users}
-                        />
-                    ))}
-                </SortableContext>
+                        ref={setNodeRef}
+                        className={`bg-gray-50 rounded-b-lg border border-t-0 border-gray-200 p-3 min-h-[400px] ${isOver ? 'bg-blue-50' : ''}`}
+                    >
+                        {tasks.map((task) => (
+                            <DraggableTaskCard
+                                key={task.id}
+                                task={task}
+                                onEdit={onEditTask}
+                                onDelete={onDeleteTask}
+                                onStatusChange={onStatusChange}
+                                users={users}
+                            />
+                        ))}
                 {tasks.length === 0 && (
                     <div className="text-center py-8 text-gray-400">
                         <div className="text-sm">No tasks in {title.toLowerCase()}</div>
@@ -548,55 +543,7 @@ const TaskModal = ({
     );
 };
 
-const KanbanColumn = ({ 
-    title, 
-    tasks, 
-    status, 
-    count, 
-    onEditTask, 
-    onDeleteTask, 
-    onStatusChange,
-    users
-}: { 
-    title: string; 
-    tasks: any[]; 
-    status: string; 
-    count: number;
-    onEditTask: (task: any) => void;
-    onDeleteTask: (task: any) => void;
-    onStatusChange: (taskId: string, newStatus: string) => void;
-    users: any[];
-}) => {
-    return (
-        <div className="flex-1 min-w-0">
-            <div className={`flex items-center justify-between px-3 py-2 rounded-t-lg border ${columnColors[status as keyof typeof columnColors]}`}>
-                <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
-                <span className="text-sm text-gray-600 bg-white px-2 py-1 rounded-full">
-                    {count}
-                </span>
-            </div>
-            <div className="bg-gray-50 rounded-b-lg border border-t-0 border-gray-200 p-3 min-h-[400px]">
-                <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
-                    {tasks.map((task) => (
-                        <DraggableTaskCard
-                            key={task.id}
-                            task={task}
-                            onEdit={onEditTask}
-                            onDelete={onDeleteTask}
-                            onStatusChange={onStatusChange}
-                            users={users}
-                        />
-                    ))}
-                </SortableContext>
-                {tasks.length === 0 && (
-                    <div className="text-center py-8 text-gray-400">
-                        <div className="text-sm">No tasks in {title.toLowerCase()}</div>
-                    </div>
-                )}
-            </div>
-        </div>
-    );
-};
+
 
 export default function TasksPage() {
     const [showFilters, setShowFilters] = useState(false);
@@ -784,9 +731,7 @@ export default function TasksPage() {
 
     const sensors = useSensors(
         useSensor(PointerSensor),
-        useSensor(KeyboardSensor, {
-            coordinateGetter: sortableKeyboardCoordinates,
-        })
+        useSensor(KeyboardSensor)
     );
 
     const handleDragStart = (event: DragStartEvent) => {
@@ -816,19 +761,29 @@ export default function TasksPage() {
 
         if (newStatus && newStatus !== activeTask.status) {
             try {
+                // Clear active task BEFORE updating to prevent animation conflicts
+                setActiveTask(null);
+                
                 await updateTask({
                     variables: {
                         id: activeTask.id,
                         input: { status: newStatus },
                     },
                 });
-                refetchTasks();
+                
+                // Refetch after a short delay to ensure the UI updates smoothly
+                setTimeout(() => {
+                    refetchTasks();
+                }, 50);
             } catch (error) {
                 console.error('Error updating task status via drag and drop:', error);
+                setActiveTask(null);
+                refetchTasks();
             }
+        } else {
+            // Clear active task if no status change needed
+            setActiveTask(null);
         }
-
-        setActiveTask(null);
     };
 
     if (tasksLoading) {
@@ -987,8 +942,12 @@ export default function TasksPage() {
                             />
                         ))}
                     </div>
-                    <DragOverlay>
-                        {activeTask ? <TaskCard task={activeTask} /> : null}
+                    <DragOverlay dropAnimation={null}>
+                        {activeTask ? (
+                            <div className="bg-white rounded-lg shadow-2xl border-2 border-blue-400 p-4 transform rotate-1 cursor-grabbing">
+                                <TaskCard task={activeTask} />
+                            </div>
+                        ) : null}
                     </DragOverlay>
                 </DndContext>
             )}

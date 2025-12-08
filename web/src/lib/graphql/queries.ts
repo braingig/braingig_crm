@@ -112,9 +112,32 @@ export const GET_TASKS = gql`
       priority
       projectId
       assignedToId
+      startDate
       dueDate
       timeSpent
+      estimatedTime
       createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const GET_TASK = gql`
+  query GetTask($id: String!) {
+    task(id: $id) {
+      id
+      title
+      description
+      status
+      priority
+      projectId
+      assignedToId
+      startDate
+      dueDate
+      timeSpent
+      estimatedTime
+      createdAt
+      updatedAt
     }
   }
 `;
@@ -124,8 +147,58 @@ export const CREATE_TASK = gql`
     createTask(input: $input) {
       id
       title
+      description
       status
       priority
+      projectId
+      assignedToId
+      startDate
+      dueDate
+      timeSpent
+      estimatedTime
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const UPDATE_TASK = gql`
+  mutation UpdateTask($id: String!, $input: UpdateTaskInput!) {
+    updateTask(id: $id, input: $input) {
+      id
+      title
+      description
+      status
+      priority
+      projectId
+      assignedToId
+      startDate
+      dueDate
+      timeSpent
+      estimatedTime
+      createdAt
+      updatedAt
+    }
+  }
+`;
+
+export const DELETE_TASK = gql`
+  mutation DeleteTask($id: String!) {
+    deleteTask(id: $id)
+  }
+`;
+
+export const ADD_COMMENT = gql`
+  mutation AddComment($taskId: String!, $content: String!) {
+    addComment(taskId: $taskId, content: $content) {
+      id
+      content
+      createdAt
+      user {
+        id
+        name
+        email
+      }
     }
   }
 `;

@@ -480,10 +480,23 @@ export default function TasksPage() {
         priority: '',
     });
 
-    // Temporarily remove filters to debug
+    // Prepare filters for GraphQL query - only include non-empty values
+    const prepareFilters = () => {
+        const activeFilters: any = {};
+        if (filters.projectId) activeFilters.projectId = filters.projectId;
+        if (filters.assignedToId) activeFilters.assignedToId = filters.assignedToId;
+        if (filters.priority) activeFilters.priority = filters.priority;
+        return Object.keys(activeFilters).length > 0 ? activeFilters : undefined;
+    };
+
     const { data: tasksData, loading: tasksLoading, error: tasksError, refetch: refetchTasks } = useQuery(GET_TASKS, {
-        variables: { filters: undefined }, // Remove filters temporarily
+        variables: { filters: prepareFilters() },
     });
+
+    // Refetch tasks when filters change
+    useEffect(() => {
+        refetchTasks();
+    }, [filters, refetchTasks]);
 
     // Debug: Log query state
     console.log('Tasks query state:', {
@@ -627,7 +640,7 @@ export default function TasksPage() {
     };
 
     const handleFilterChange = (key: string, value: string) => {
-        setFilters({ ...filters, [key]: value });
+        setFilters(prev => ({ ...prev, [key]: value }));
     };
 
     const clearFilters = () => {
@@ -674,7 +687,9 @@ export default function TasksPage() {
                             <FunnelIcon className="h-4 w-4 mr-2" />
                             Filters
                             {(filters.projectId || filters.assignedToId || filters.priority) && (
-                                <span className="ml-2 w-2 h-2 bg-primary-600 rounded-full"></span>
+                                <span className="ml-2 px-2 py-0.5 text-xs bg-primary-600 text-white rounded-full">
+                                    {[filters.projectId, filters.assignedToId, filters.priority].filter(Boolean).length}
+                                </span>
                             )}
                         </button>
                         <button 
@@ -765,21 +780,37 @@ export default function TasksPage() {
             </div>
 
             {/* Kanban Board */}
-            <div className="flex space-x-4 overflow-x-auto pb-4">
-                {columns.map((column) => (
-                    <KanbanColumn
-                        key={column.key}
-                        title={column.title}
-                        tasks={getTasksByStatus(column.key)}
-                        status={column.key}
-                        count={getTasksByStatus(column.key).length}
-                        onEditTask={handleEditTask}
-                        onDeleteTask={handleDeleteTask}
-                        onStatusChange={handleStatusChange}
-                        users={users}
-                    />
-                ))}
-            </div>
+            {tasks.length === 0 && (filters.projectId || filters.assignedToId || filters.priority) ? (
+                <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
+                    <FunnelIcon className="mx-auto h-12 w-12 text-gray-400" />
+                    <h3 className="mt-2 text-sm font-medium text-gray-900">No tasks match your filters</h3>
+                    <p className="mt-1 text-sm text-gray-500">
+                        Try adjusting your filter criteria or clear all filters to see more tasks.
+                    </p>
+                    <button
+                        onClick={clearFilters}
+                        className="mt-4 inline-flex items-center px-3 py-2 border border-gray-300 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 bg-white hover:bg-gray-50"
+                    >
+                        Clear Filters
+                    </button>
+                </div>
+            ) : (
+                <div className="flex space-x-4 overflow-x-auto pb-4">
+                    {columns.map((column) => (
+                        <KanbanColumn
+                            key={column.key}
+                            title={column.title}
+                            tasks={getTasksByStatus(column.key)}
+                            status={column.key}
+                            count={getTasksByStatus(column.key).length}
+                            onEditTask={handleEditTask}
+                            onDeleteTask={handleDeleteTask}
+                            onStatusChange={handleStatusChange}
+                            users={users}
+                        />
+                    ))}
+                </div>
+            )}
 
             {/* Stats Bar */}
             <div className="mt-6 grid grid-cols-1 md:grid-cols-4 gap-4">

@@ -25,6 +25,27 @@ import {
     UPDATE_TASK,
     DELETE_TASK,
 } from '@/lib/graphql/queries';
+import {
+    DndContext,
+    DragOverlay,
+    closestCenter,
+    KeyboardSensor,
+    PointerSensor,
+    useSensor,
+    useSensors,
+    DragStartEvent,
+    DragEndEvent,
+} from '@dnd-kit/core';
+import {
+    arrayMove,
+    SortableContext,
+    sortableKeyboardCoordinates,
+    verticalListSortingStrategy,
+    useSortable,
+} from '@dnd-kit/sortable';
+import {
+    useDroppable,
+} from '@dnd-kit/core';
 
 const priorityColors: { [key: string]: string } = {
     URGENT: 'bg-red-100 text-red-800 border-red-200',
@@ -40,7 +61,7 @@ const columnColors: { [key: string]: string } = {
     COMPLETED: 'bg-green-50 border-green-200',
 };
 
-const TaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: { 
+const DraggableTaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: { 
     task: any; 
     onEdit: (task: any) => void;
     onDelete: (task: any) => void;
@@ -48,13 +69,33 @@ const TaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: {
     users: any[];
 }) => {
     const [showMenu, setShowMenu] = useState(false);
+    const {
+        attributes,
+        listeners,
+        setNodeRef,
+        transform,
+        transition,
+        isDragging,
+    } = useSortable({ id: task.id });
+
+    const style = {
+        transform: transform ? `translate3d(${transform.x}px, ${transform.y}px, 0)` : undefined,
+        transition,
+        opacity: isDragging ? 0.5 : 1,
+    };
 
     const handleStatusChange = (newStatus: string) => {
         onStatusChange(task.id, newStatus);
     };
 
     return (
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-3 hover:shadow-md transition-shadow cursor-pointer relative">
+        <div 
+            ref={setNodeRef} 
+            style={style}
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-3 hover:shadow-md transition-shadow cursor-pointer relative"
+            {...attributes}
+            {...listeners}
+        >
             <div className="flex items-start justify-between mb-2">
                 <h3 className="text-sm font-medium text-gray-900 line-clamp-2">
                     {task.title}
@@ -184,6 +225,91 @@ const TaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: {
                     >
                         Complete
                     </button>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// Droppable Kanban Column
+const DroppableKanbanColumn = ({ 
+    title, 
+    tasks, 
+    status, 
+    count, 
+    onEditTask, 
+    onDeleteTask, 
+    onStatusChange,
+    users
+}: { 
+    title: string; 
+    tasks: any[]; 
+    status: string; 
+    count: number;
+    onEditTask: (task: any) => void;
+    onDeleteTask: (task: any) => void;
+    onStatusChange: (taskId: string, newStatus: string) => void;
+    users: any[];
+}) => {
+    const { setNodeRef, isOver } = useDroppable({
+        id: status,
+    });
+
+    return (
+        <div className="flex-1 min-w-0">
+            <div className={`flex items-center justify-between px-3 py-2 rounded-t-lg border ${columnColors[status as keyof typeof columnColors]} ${isOver ? 'ring-2 ring-blue-400' : ''}`}>
+                <h3 className="text-sm font-semibold text-gray-900">{title}</h3>
+                <span className="text-sm text-gray-600 bg-white px-2 py-1 rounded-full">
+                    {count}
+                </span>
+            </div>
+            <div 
+                ref={setNodeRef}
+                className={`bg-gray-50 rounded-b-lg border border-t-0 border-gray-200 p-3 min-h-[400px] ${isOver ? 'bg-blue-50' : ''}`}
+            >
+                <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+                    {tasks.map((task) => (
+                        <DraggableTaskCard
+                            key={task.id}
+                            task={task}
+                            onEdit={onEditTask}
+                            onDelete={onDeleteTask}
+                            onStatusChange={onStatusChange}
+                            users={users}
+                        />
+                    ))}
+                </SortableContext>
+                {tasks.length === 0 && (
+                    <div className="text-center py-8 text-gray-400">
+                        <div className="text-sm">No tasks in {title.toLowerCase()}</div>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+};
+
+// Simple TaskCard for drag overlay
+const TaskCard = ({ task }: { task: any }) => {
+    return (
+        <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-4 opacity-90">
+            <h3 className="text-sm font-medium text-gray-900 line-clamp-2 mb-2">
+                {task.title}
+            </h3>
+            {task.description && (
+                <p className="text-xs text-gray-600 line-clamp-2 mb-2">
+                    {task.description}
+                </p>
+            )}
+            <div className="flex items-center justify-between">
+                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${priorityColors[task.priority]}`}>
+                    {task.priority}
+                </span>
+                {task.dueDate && (
+                    <div className="flex items-center text-xs text-gray-500">
+                        <CalendarIcon className="h-3 w-3 mr-1" />
+                        {new Date(task.dueDate).toLocaleDateString()}
+                    </div>
                 )}
             </div>
         </div>
@@ -450,16 +576,18 @@ const KanbanColumn = ({
                 </span>
             </div>
             <div className="bg-gray-50 rounded-b-lg border border-t-0 border-gray-200 p-3 min-h-[400px]">
-                {tasks.map((task) => (
-                    <TaskCard
-                        key={task.id}
-                        task={task}
-                        onEdit={onEditTask}
-                        onDelete={onDeleteTask}
-                        onStatusChange={onStatusChange}
-                        users={users}
-                    />
-                ))}
+                <SortableContext items={tasks.map((task) => task.id)} strategy={verticalListSortingStrategy}>
+                    {tasks.map((task) => (
+                        <DraggableTaskCard
+                            key={task.id}
+                            task={task}
+                            onEdit={onEditTask}
+                            onDelete={onDeleteTask}
+                            onStatusChange={onStatusChange}
+                            users={users}
+                        />
+                    ))}
+                </SortableContext>
                 {tasks.length === 0 && (
                     <div className="text-center py-8 text-gray-400">
                         <div className="text-sm">No tasks in {title.toLowerCase()}</div>
@@ -651,6 +779,58 @@ export default function TasksPage() {
         });
     };
 
+    // Drag and drop handlers
+    const [activeTask, setActiveTask] = useState<any | null>(null);
+
+    const sensors = useSensors(
+        useSensor(PointerSensor),
+        useSensor(KeyboardSensor, {
+            coordinateGetter: sortableKeyboardCoordinates,
+        })
+    );
+
+    const handleDragStart = (event: DragStartEvent) => {
+        const { active } = event;
+        const task = tasks.find((t: any) => t.id === active.id);
+        setActiveTask(task);
+    };
+
+    const handleDragEnd = async (event: DragEndEvent) => {
+        const { active, over } = event;
+
+        if (!over) {
+            setActiveTask(null);
+            return;
+        }
+
+        const activeTask = tasks.find((t: any) => t.id === active.id);
+        
+        if (!activeTask) {
+            setActiveTask(null);
+            return;
+        }
+
+        // Find which column the task was dropped on
+        const columnElement = over.id as string;
+        const newStatus = columns.find(col => col.key === columnElement)?.key;
+
+        if (newStatus && newStatus !== activeTask.status) {
+            try {
+                await updateTask({
+                    variables: {
+                        id: activeTask.id,
+                        input: { status: newStatus },
+                    },
+                });
+                refetchTasks();
+            } catch (error) {
+                console.error('Error updating task status via drag and drop:', error);
+            }
+        }
+
+        setActiveTask(null);
+    };
+
     if (tasksLoading) {
         return (
             <div className="flex items-center justify-center h-64">
@@ -692,16 +872,7 @@ export default function TasksPage() {
                                 </span>
                             )}
                         </button>
-                        <button 
-                            onClick={() => {
-                                console.log('User data:', userData);
-                                console.log('Access token:', typeof window !== 'undefined' ? localStorage.getItem('accessToken') : 'N/A');
-                                console.log('Refresh token:', typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : 'N/A');
-                            }}
-                            className="inline-flex items-center px-3 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
-                        >
-                            Debug Auth
-                        </button>
+
                         <button 
                             onClick={handleCreateTask}
                             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
@@ -795,21 +966,31 @@ export default function TasksPage() {
                     </button>
                 </div>
             ) : (
-                <div className="flex space-x-4 overflow-x-auto pb-4">
-                    {columns.map((column) => (
-                        <KanbanColumn
-                            key={column.key}
-                            title={column.title}
-                            tasks={getTasksByStatus(column.key)}
-                            status={column.key}
-                            count={getTasksByStatus(column.key).length}
-                            onEditTask={handleEditTask}
-                            onDeleteTask={handleDeleteTask}
-                            onStatusChange={handleStatusChange}
-                            users={users}
-                        />
-                    ))}
-                </div>
+                <DndContext
+                    sensors={sensors}
+                    collisionDetection={closestCenter}
+                    onDragStart={handleDragStart}
+                    onDragEnd={handleDragEnd}
+                >
+                    <div className="flex space-x-4 overflow-x-auto pb-4">
+                        {columns.map((column) => (
+                            <DroppableKanbanColumn
+                                key={column.key}
+                                title={column.title}
+                                tasks={getTasksByStatus(column.key)}
+                                status={column.key}
+                                count={getTasksByStatus(column.key).length}
+                                onEditTask={handleEditTask}
+                                onDeleteTask={handleDeleteTask}
+                                onStatusChange={handleStatusChange}
+                                users={users}
+                            />
+                        ))}
+                    </div>
+                    <DragOverlay>
+                        {activeTask ? <TaskCard task={activeTask} /> : null}
+                    </DragOverlay>
+                </DndContext>
             )}
 
             {/* Stats Bar */}

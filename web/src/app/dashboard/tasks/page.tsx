@@ -57,8 +57,8 @@ const columnColors: { [key: string]: string } = {
     COMPLETED: 'bg-green-50 border-green-200',
 };
 
-const DraggableTaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: { 
-    task: any; 
+const DraggableTaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: {
+    task: any;
     onEdit: (task: any) => void;
     onDelete: (task: any) => void;
     onStatusChange: (taskId: string, newStatus: string) => void;
@@ -86,63 +86,24 @@ const DraggableTaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: {
     };
 
     return (
-        <div 
-            ref={setNodeRef} 
+        <div
+            ref={setNodeRef}
             style={style}
-            className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-3 hover:shadow-md transition-shadow relative"
+            className="relative bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-3 hover:shadow-md transition-shadow relative"
         >
-            <div 
+            <div
                 className="cursor-grab active:cursor-grabbing"
                 {...attributes}
                 {...listeners}
             >
                 <div className="flex items-start justify-between mb-2">
-                <div className="flex items-center space-x-2 flex-1">
-                    <h3 className="text-sm font-medium text-gray-900 line-clamp-2 hover:bg-gray-50 px-1 py-0.5 rounded">
-                        {task.title}
-                    </h3>
-                </div>
-                    <div className="relative">
-                        <button 
-                            onClick={(e) => {
-                                e.stopPropagation();
-                                setShowMenu(!showMenu);
-                            }}
-                            className="text-gray-400 hover:text-gray-600"
-                        >
-                            <EllipsisHorizontalIcon className="h-4 w-4" />
-                        </button>
-                        {showMenu && (
-                            <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200">
-                                <div className="py-1">
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onEdit(task);
-                                            setShowMenu(false);
-                                        }}
-                                        className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
-                                    >
-                                        <PencilIcon className="h-4 w-4 mr-2" />
-                                        Edit
-                                    </button>
-                                    <button
-                                        onClick={(e) => {
-                                            e.stopPropagation();
-                                            onDelete(task);
-                                            setShowMenu(false);
-                                        }}
-                                        className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full"
-                                    >
-                                        <TrashIcon className="h-4 w-4 mr-2" />
-                                        Delete
-                                    </button>
-                                </div>
-                            </div>
-                        )}
+                    <div className="flex items-center space-x-2 flex-1">
+                        <h3 className="text-sm font-medium text-gray-900 line-clamp-2 hover:bg-gray-50 px-1 py-0.5 rounded pr-3">
+                            {task.title}
+                        </h3>
                     </div>
                 </div>
-                
+
                 {task.description && (
                     <p className="text-xs text-gray-600 mb-3 line-clamp-2">
                         {task.description}
@@ -179,6 +140,55 @@ const DraggableTaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: {
                 {task.project && (
                     <div className="mt-2 pt-2 border-t border-gray-100">
                         <span className="text-xs text-gray-500">{task.project.name}</span>
+                    </div>
+                )}
+            </div>
+            <div className="absolute top-4 right-3">
+                <button
+                    onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setShowMenu(!showMenu);
+                    }}
+                    onMouseDown={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                    }}
+                    onMouseUp={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                    }}
+                    className="text-gray-400 hover:text-gray-600 pointer-events-auto"
+                    style={{ pointerEvents: 'auto' }}
+                >
+                    <EllipsisHorizontalIcon className="h-4 w-4" />
+                </button>
+                {showMenu && (
+                    <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-50 border border-gray-200">
+                        <div className="py-1">
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onEdit(task);
+                                    setShowMenu(false);
+                                }}
+                                className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
+                            >
+                                <PencilIcon className="h-4 w-4 mr-2" />
+                                Edit
+                            </button>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    onDelete(task);
+                                    setShowMenu(false);
+                                }}
+                                className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full"
+                            >
+                                <TrashIcon className="h-4 w-4 mr-2" />
+                                Delete
+                            </button>
+                        </div>
                     </div>
                 )}
             </div>
@@ -235,19 +245,19 @@ const DraggableTaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: {
 };
 
 // Droppable Kanban Column
-const DroppableKanbanColumn = ({ 
-    title, 
-    tasks, 
-    status, 
-    count, 
-    onEditTask, 
-    onDeleteTask, 
+const DroppableKanbanColumn = ({
+    title,
+    tasks,
+    status,
+    count,
+    onEditTask,
+    onDeleteTask,
     onStatusChange,
     users
-}: { 
-    title: string; 
-    tasks: any[]; 
-    status: string; 
+}: {
+    title: string;
+    tasks: any[];
+    status: string;
     count: number;
     onEditTask: (task: any) => void;
     onDeleteTask: (task: any) => void;
@@ -266,20 +276,20 @@ const DroppableKanbanColumn = ({
                     {count}
                 </span>
             </div>
-            <div 
-                        ref={setNodeRef}
-                        className={`bg-gray-50 rounded-b-lg border border-t-0 border-gray-200 p-3 min-h-[400px] ${isOver ? 'bg-blue-50' : ''}`}
-                    >
-                        {tasks.map((task) => (
-                            <DraggableTaskCard
-                                key={task.id}
-                                task={task}
-                                onEdit={onEditTask}
-                                onDelete={onDeleteTask}
-                                onStatusChange={onStatusChange}
-                                users={users}
-                            />
-                        ))}
+            <div
+                ref={setNodeRef}
+                className={`bg-gray-50 rounded-b-lg border border-t-0 border-gray-200 p-3 min-h-[400px] ${isOver ? 'bg-blue-50' : ''}`}
+            >
+                {tasks.map((task) => (
+                    <DraggableTaskCard
+                        key={task.id}
+                        task={task}
+                        onEdit={onEditTask}
+                        onDelete={onDeleteTask}
+                        onStatusChange={onStatusChange}
+                        users={users}
+                    />
+                ))}
                 {tasks.length === 0 && (
                     <div className="text-center py-8 text-gray-400">
                         <div className="text-sm">No tasks in {title.toLowerCase()}</div>
@@ -317,13 +327,13 @@ const TaskCard = ({ task }: { task: any }) => {
     );
 };
 
-const TaskModal = ({ 
-    task, 
-    isOpen, 
-    onClose, 
-    onSave, 
-    projects, 
-    users 
+const TaskModal = ({
+    task,
+    isOpen,
+    onClose,
+    onSave,
+    projects,
+    users
 }: {
     task: any | null;
     isOpen: boolean;
@@ -368,18 +378,18 @@ const TaskModal = ({
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        
+
         // Validate required fields
         if (!formData.title.trim()) {
             alert('Title is required');
             return;
         }
-        
+
         if (!formData.projectId) {
             alert('Project is required');
             return;
         }
-        
+
         // Prepare data with proper date handling
         const submitData: any = {
             title: formData.title.trim(),
@@ -643,7 +653,7 @@ export default function TasksPage() {
                 // For updates, exclude projectId as it's not allowed in UpdateTaskInput
                 const { projectId, ...updateData } = data;
                 console.log('Update data (without projectId):', updateData);
-                
+
                 const result = await updateTask({
                     variables: {
                         id: editingTask.id,
@@ -668,7 +678,7 @@ export default function TasksPage() {
             console.error('Error saving task:', error);
             console.error('GraphQL errors:', error.graphQLErrors);
             console.error('Network error:', error.networkError);
-            
+
             // More detailed error reporting
             if (error.graphQLErrors && error.graphQLErrors.length > 0) {
                 const gqlError = error.graphQLErrors[0];
@@ -679,7 +689,7 @@ export default function TasksPage() {
                 console.error('Network error result:', (error.networkError as any)?.result);
                 console.error('Network error status:', (error.networkError as any)?.statusCode);
                 console.error('Network error text:', (error.networkError as any)?.statusText);
-                
+
                 // Try to extract more details from the response
                 const result = (error.networkError as any)?.result;
                 if (result && result.errors) {
@@ -755,7 +765,7 @@ export default function TasksPage() {
         }
 
         const activeTask = tasks.find((t: any) => t.id === active.id);
-        
+
         if (!activeTask) {
             setActiveTask(null);
             return;
@@ -769,14 +779,14 @@ export default function TasksPage() {
             try {
                 // Clear active task BEFORE updating to prevent animation conflicts
                 setActiveTask(null);
-                
+
                 await updateTask({
                     variables: {
                         id: activeTask.id,
                         input: { status: newStatus },
                     },
                 });
-                
+
                 // Refetch after a short delay to ensure the UI updates smoothly
                 setTimeout(() => {
                     refetchTasks();
@@ -834,7 +844,7 @@ export default function TasksPage() {
                             )}
                         </button>
 
-                        <button 
+                        <button
                             onClick={handleCreateTask}
                             className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary-600 hover:bg-primary-700"
                         >
@@ -852,7 +862,7 @@ export default function TasksPage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                     Project
                                 </label>
-                                <select 
+                                <select
                                     value={filters.projectId}
                                     onChange={(e) => handleFilterChange('projectId', e.target.value)}
                                     className="w-full rounded-md border-gray-300 text-sm"
@@ -869,7 +879,7 @@ export default function TasksPage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                     Assignee
                                 </label>
-                                <select 
+                                <select
                                     value={filters.assignedToId}
                                     onChange={(e) => handleFilterChange('assignedToId', e.target.value)}
                                     className="w-full rounded-md border-gray-300 text-sm"
@@ -886,7 +896,7 @@ export default function TasksPage() {
                                 <label className="block text-sm font-medium text-gray-700 mb-1">
                                     Priority
                                 </label>
-                                <select 
+                                <select
                                     value={filters.priority}
                                     onChange={(e) => handleFilterChange('priority', e.target.value)}
                                     className="w-full rounded-md border-gray-300 text-sm"

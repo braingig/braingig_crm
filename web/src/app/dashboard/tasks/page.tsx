@@ -89,93 +89,99 @@ const DraggableTaskCard = ({ task, onEdit, onDelete, onStatusChange, users }: {
         <div 
             ref={setNodeRef} 
             style={style}
-            className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-3 hover:shadow-md transition-shadow cursor-pointer relative"
-            {...attributes}
-            {...listeners}
+            className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-3 hover:shadow-md transition-shadow relative"
         >
-            <div className="flex items-start justify-between mb-2">
-                <h3 className="text-sm font-medium text-gray-900 line-clamp-2">
-                    {task.title}
-                </h3>
-                <div className="relative">
-                    <button 
-                        onClick={(e) => {
-                            e.stopPropagation();
-                            setShowMenu(!showMenu);
-                        }}
-                        className="text-gray-400 hover:text-gray-600"
-                    >
-                        <EllipsisHorizontalIcon className="h-4 w-4" />
-                    </button>
-                    {showMenu && (
-                        <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200">
-                            <div className="py-1">
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onEdit(task);
-                                        setShowMenu(false);
-                                    }}
-                                    className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
-                                >
-                                    <PencilIcon className="h-4 w-4 mr-2" />
-                                    Edit
-                                </button>
-                                <button
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        onDelete(task);
-                                        setShowMenu(false);
-                                    }}
-                                    className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full"
-                                >
-                                    <TrashIcon className="h-4 w-4 mr-2" />
-                                    Delete
-                                </button>
+            <div 
+                className="cursor-grab active:cursor-grabbing"
+                {...attributes}
+                {...listeners}
+            >
+                <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center space-x-2 flex-1">
+                    <h3 className="text-sm font-medium text-gray-900 line-clamp-2 hover:bg-gray-50 px-1 py-0.5 rounded">
+                        {task.title}
+                    </h3>
+                </div>
+                    <div className="relative">
+                        <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                setShowMenu(!showMenu);
+                            }}
+                            className="text-gray-400 hover:text-gray-600"
+                        >
+                            <EllipsisHorizontalIcon className="h-4 w-4" />
+                        </button>
+                        {showMenu && (
+                            <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg z-10 border border-gray-200">
+                                <div className="py-1">
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onEdit(task);
+                                            setShowMenu(false);
+                                        }}
+                                        className="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full"
+                                    >
+                                        <PencilIcon className="h-4 w-4 mr-2" />
+                                        Edit
+                                    </button>
+                                    <button
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            onDelete(task);
+                                            setShowMenu(false);
+                                        }}
+                                        className="flex items-center px-4 py-2 text-sm text-red-600 hover:bg-red-50 w-full"
+                                    >
+                                        <TrashIcon className="h-4 w-4 mr-2" />
+                                        Delete
+                                    </button>
+                                </div>
                             </div>
+                        )}
+                    </div>
+                </div>
+                
+                {task.description && (
+                    <p className="text-xs text-gray-600 mb-3 line-clamp-2">
+                        {task.description}
+                    </p>
+                )}
+
+                <div className="flex items-center justify-between mb-2">
+                    <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${priorityColors[task.priority]}`}>
+                        {task.priority}
+                    </span>
+                    <div className="flex items-center text-xs text-gray-500">
+                        <ClockIcon className="h-3 w-3 mr-1" />
+                        {task.estimatedTime ? `${task.estimatedTime}h` : 'No estimate'}
+                    </div>
+                </div>
+
+                <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center text-xs text-gray-500">
+                        <CalendarIcon className="h-3 w-3 mr-1" />
+                        {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No due date'}
+                    </div>
+                    {task.assignedToId && (
+                        <div className="flex items-center">
+                            <div className="h-6 w-6 rounded-full bg-gray-300 flex items-center justify-center">
+                                <UserCircleIcon className="h-4 w-4 text-gray-600" />
+                            </div>
+                            <span className="ml-1 text-xs text-gray-600">
+                                {users.find((u: any) => u.id === task.assignedToId)?.name || 'Unassigned'}
+                            </span>
                         </div>
                     )}
                 </div>
-            </div>
-            
-            {task.description && (
-                <p className="text-xs text-gray-600 mb-3 line-clamp-2">
-                    {task.description}
-                </p>
-            )}
 
-            <div className="flex items-center justify-between mb-2">
-                <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium border ${priorityColors[task.priority]}`}>
-                    {task.priority}
-                </span>
-                <div className="flex items-center text-xs text-gray-500">
-                    <ClockIcon className="h-3 w-3 mr-1" />
-                    {task.estimatedTime ? `${task.estimatedTime}h` : 'No estimate'}
-                </div>
-            </div>
-
-            <div className="flex items-center justify-between mb-2">
-                <div className="flex items-center text-xs text-gray-500">
-                    <CalendarIcon className="h-3 w-3 mr-1" />
-                    {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'No due date'}
-                </div>
-                {task.assignedToId && (
-                    <div className="flex items-center">
-                        <div className="h-6 w-6 rounded-full bg-gray-300 flex items-center justify-center">
-                            <UserCircleIcon className="h-4 w-4 text-gray-600" />
-                        </div>
-                        <span className="ml-1 text-xs text-gray-600">
-                            {users.find((u: any) => u.id === task.assignedToId)?.name || 'Unassigned'}
-                        </span>
+                {task.project && (
+                    <div className="mt-2 pt-2 border-t border-gray-100">
+                        <span className="text-xs text-gray-500">{task.project.name}</span>
                     </div>
                 )}
             </div>
-
-            {task.project && (
-                <div className="mt-2 pt-2 border-t border-gray-100">
-                    <span className="text-xs text-gray-500">{task.project.name}</span>
-                </div>
-            )}
 
             {/* Status Change Buttons */}
             <div className="mt-3 pt-2 border-t border-gray-100 flex gap-1">

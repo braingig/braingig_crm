@@ -228,7 +228,13 @@ export const START_TIME_ENTRY = gql`
     startTimeEntry(input: $input) {
       id
       startTime
+      endTime
+      duration
+      description
       taskId
+      employeeId
+      isManual
+      createdAt
     }
   }
 `;
@@ -237,8 +243,14 @@ export const STOP_TIME_ENTRY = gql`
   mutation StopTimeEntry {
     stopTimeEntry {
       id
+      startTime
       endTime
       duration
+      description
+      taskId
+      employeeId
+      isManual
+      createdAt
     }
   }
 `;
@@ -248,8 +260,13 @@ export const GET_ACTIVE_TIME_ENTRY = gql`
     activeTimeEntry {
       id
       startTime
-      taskId
+      endTime
+      duration
       description
+      taskId
+      employeeId
+      isManual
+      createdAt
     }
   }
 `;
@@ -258,22 +275,31 @@ export const GET_TODAY_TIMESHEET = gql`
   query GetTodayTimesheet {
     todayTimesheet {
       id
+      date
       checkIn
       checkOut
       totalHours
       status
+      notes
+      employeeId
+      createdAt
+      updatedAt
     }
   }
 `;
 
 export const GET_TIME_ENTRIES = gql`
-  query GetTimeEntries($employeeId: String) {
-    timeEntries(employeeId: $employeeId) {
+  query GetTimeEntries($employeeId: String, $taskId: String) {
+    timeEntries(employeeId: $employeeId, taskId: $taskId) {
       id
       startTime
       endTime
       duration
       description
+      taskId
+      employeeId
+      isManual
+      createdAt
     }
   }
 `;
@@ -287,6 +313,10 @@ export const GET_TIMESHEETS = gql`
       checkOut
       totalHours
       status
+      notes
+      employeeId
+      createdAt
+      updatedAt
     }
   }
 `;

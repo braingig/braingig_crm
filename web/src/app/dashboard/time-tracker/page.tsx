@@ -104,6 +104,10 @@ export default function TimeTrackerPage() {
     // Filter projects to only show those that have tasks assigned to current user
     const myProjectIds = [...new Set(myTasks.map((task: any) => task.projectId))];
     const projects = allProjects.filter((project: any) => myProjectIds.includes(project.id));
+
+    // Create lookup maps for project and task names
+    const projectMap = new Map(allProjects.map((project: any) => [project.id, project.name]));
+    const taskMap = new Map(tasks.map((task: any) => [task.id, task.title]));
     
     // Check if user has any assigned tasks
     const hasAssignedTasks = myTasks.length > 0;
@@ -290,6 +294,29 @@ export default function TimeTrackerPage() {
             day: 'numeric',
             year: 'numeric'
         });
+    };
+
+    
+
+    const formatDuration = (seconds: number) => {
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const secs = seconds % 60;
+        
+        if (hours > 0) {
+            return `${hours}h ${minutes}m ${secs}s`;
+        } else if (minutes > 0) {
+            return `${minutes}m ${secs}s`;
+        } else {
+            return `${secs}s`;
+        }
+    };
+
+    const calculateDuration = (startTime: string, endTime?: string) => {
+        const start = new Date(startTime);
+        const end = endTime ? new Date(endTime) : new Date();
+        const durationInSeconds = Math.floor((end.getTime() - start.getTime()) / 1000);
+        return formatDuration(durationInSeconds);
     };
 
     const getAttendanceStatus = () => {
@@ -854,7 +881,13 @@ export default function TimeTrackerPage() {
                                                 Project
                                             </th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                                                Description
+                                                Task / Description
+                                            </th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                Start Time
+                                            </th>
+                                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                                                End Time
                                             </th>
                                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                                                 Duration
@@ -870,14 +903,59 @@ export default function TimeTrackerPage() {
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
                                                     {formatDate(entry.startTime)}
                                                 </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                      {entry.taskId ? (
+                                                          (() => {
+                                                              const task = tasks.find((t: any) => t.id === entry.taskId);
+                                                              const projectName = task ? projectMap.get(task.projectId) as string : 'Unknown Project';
+                                                              return (
+                                                                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                                                      {projectName || 'Unknown Project'}
+                                                                  </p>
+                                                              );
+                                                          })()
+                                                      ) : (
+                                                          <p className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                                                              No Project
+                                                          </p>
+                                                      )}
+                                                  </td>
+                                                  <td className="px-6 py-4 text-sm">
+                                                      {entry.taskId ? (
+                                                          <div>
+                                                              <p className="font-medium text-gray-900 dark:text-white">
+                                                                  {(taskMap.get(entry.taskId) as string) || 'Unknown Task'}
+                                                              </p>
+                                                              {entry.description && (
+                                                                  <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                                      {entry.description}
+                                                                  </p>
+                                                              )}
+                                                          </div>
+                                                      ) : (
+                                                          <div>
+                                                              <p className="text-gray-900 dark:text-white">
+                                                                  {entry.description || 'No description'}
+                                                              </p>
+                                                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                                                                  No task assigned
+                                                              </p>
+                                                          </div>
+                                                      )}
+                                                  </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                                    {entry.projectId ? getProjectName(entry.projectId) : 'General'}
-                                                </td>
-                                                <td className="px-6 py-4 text-sm text-gray-900 dark:text-white">
-                                                    {entry.description || 'No description'}
+                                                    {formatTimeFromDate(entry.startTime)}
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                                                    {entry.duration ? `${Math.floor(entry.duration / 60)}h ${entry.duration % 60}m` : 'Active'}
+                                                    {entry.endTime ? formatTimeFromDate(entry.endTime) : '-'}
+                                                </td>
+                                                <td className="px-6 py-4 whitespace-nowrap">
+                                                    <div className="flex items-center">
+                                                        <ClockIcon className="h-4 w-4 text-gray-400 mr-1" />
+                                                        <span className="text-sm text-gray-900 dark:text-white">
+                                                            {entry.endTime ? calculateDuration(entry.startTime, entry.endTime) : calculateDuration(entry.startTime)}
+                                                        </span>
+                                                    </div>
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${

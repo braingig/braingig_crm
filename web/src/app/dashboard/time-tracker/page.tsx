@@ -1,7 +1,7 @@
 'use client';
 
-import { useQuery, useMutation } from '@apollo/client';
-import { GET_ACTIVE_TIME_ENTRY, GET_TODAY_TIMESHEET, GET_TIME_ENTRIES, GET_TIMESHEETS, CHECK_IN, CHECK_OUT, START_TIME_ENTRY, STOP_TIME_ENTRY, GET_PROJECTS, GET_TASKS } from '@/lib/graphql/queries';
+import { useQuery, useMutation, useApolloClient } from '@apollo/client';
+import { GET_ACTIVE_TIME_ENTRY, GET_TODAY_TIMESHEET, GET_TIME_ENTRIES, GET_TIMESHEETS, CHECK_IN, CHECK_OUT, START_TIME_ENTRY, STOP_TIME_ENTRY, GET_PROJECTS, GET_TASKS, GET_ME } from '@/lib/graphql/queries';
 import { useState, useEffect } from 'react';
 import { 
     ClockIcon, 
@@ -19,7 +19,8 @@ import {
     PlusIcon,
     XMarkIcon,
     CheckCircleIcon,
-    ExclamationCircleIcon
+    ExclamationCircleIcon,
+    InformationCircleIcon
 } from '@heroicons/react/24/outline';
 
 export default function TimeTrackerPage() {
@@ -40,20 +41,78 @@ export default function TimeTrackerPage() {
     const [viewMode, setViewMode] = useState<'dashboard' | 'timesheet' | 'reports'>('dashboard');
     const [timesheetFilter, setTimesheetFilter] = useState<'today' | 'week' | 'month'>('week');
 
+    // Apollo Client for cache management
+    const client = useApolloClient();
+
     // GraphQL queries
-    const { data: activeEntryData, refetch: refetchActiveEntry, error: activeEntryError } = useQuery(GET_ACTIVE_TIME_ENTRY);
-    const { data: todayTimesheetData, refetch: refetchTodayTimesheet, error: todayTimesheetError } = useQuery(GET_TODAY_TIMESHEET);
-    const { data: timeEntriesData, refetch: refetchTimeEntries, error: timeEntriesError } = useQuery(GET_TIME_ENTRIES);
-    const { data: projectsData, error: projectsError } = useQuery(GET_PROJECTS);
+    const { data: meData, error: meError } = useQuery(GET_ME, {
+        fetchPolicy: 'network-only',
+        notifyOnNetworkStatusChange: true
+    });
+    const { data: activeEntryData, refetch: refetchActiveEntry, error: activeEntryError } = useQuery(GET_ACTIVE_TIME_ENTRY, {
+        fetchPolicy: 'network-only',
+        notifyOnNetworkStatusChange: true
+    });
+    const { data: todayTimesheetData, refetch: refetchTodayTimesheet, error: todayTimesheetError } = useQuery(GET_TODAY_TIMESHEET, {
+        fetchPolicy: 'network-only',
+        notifyOnNetworkStatusChange: true
+    });
+    const { data: timeEntriesData, refetch: refetchTimeEntries, error: timeEntriesError } = useQuery(GET_TIME_ENTRIES, {
+        fetchPolicy: 'network-only',
+        notifyOnNetworkStatusChange: true
+    });
+    
+    // Get current user ID for filtering
+    const currentUserId = meData?.me?.id;
+    
+    // Get tasks assigned to current user
+    const { data: myTasksData, error: myTasksError } = useQuery(GET_TASKS, {
+        variables: { filters: { assignedToId: currentUserId } },
+        skip: !currentUserId,
+        fetchPolicy: 'network-only',
+        notifyOnNetworkStatusChange: true
+    });
+    
+    // Get projects that have tasks assigned to current user
+    const { data: projectsData, error: projectsError } = useQuery(GET_PROJECTS, {
+        fetchPolicy: 'network-only',
+        notifyOnNetworkStatusChange: true
+    });
+    
+    // Filter tasks by selected project (only from user's assigned tasks)
     const { data: tasksData, error: tasksError } = useQuery(GET_TASKS, {
-        variables: { filters: { projectId: selectedProject } },
-        skip: !selectedProject
+        variables: { 
+            filters: { 
+                assignedToId: currentUserId,
+                projectId: selectedProject 
+            } 
+        },
+        skip: !currentUserId,
+        fetchPolicy: 'network-only',
+        notifyOnNetworkStatusChange: true
     });
 
     const activeEntry = activeEntryData?.activeTimeEntry;
     const todayTimesheet = todayTimesheetData?.todayTimesheet;
-    const projects = projectsData?.projects || [];
+    const allProjects = projectsData?.projects || [];
+    const myTasks = myTasksData?.tasks || [];
     const tasks = tasksData?.tasks || [];
+    
+    // Filter projects to only show those that have tasks assigned to current user
+    const myProjectIds = [...new Set(myTasks.map((task: any) => task.projectId))];
+    const projects = allProjects.filter((project: any) => myProjectIds.includes(project.id));
+    
+    // Check if user has any assigned tasks
+    const hasAssignedTasks = myTasks.length > 0;
+
+    // Clear selected project when user changes to avoid showing wrong project
+    useEffect(() => {
+        if (currentUserId) {
+            setSelectedProject('');
+        }
+    }, [currentUserId]);
+
+    
 
     // Calculate date ranges for week and month
     const getWeekStart = () => {
@@ -114,17 +173,31 @@ export default function TimeTrackerPage() {
         refetchActiveEntry();
         refetchTodayTimesheet();
     }});
-    const [startTimer] = useMutation(START_TIME_ENTRY, { onCompleted: () => {
-        refetchActiveEntry();
-        refetchTimeEntries();
-        setSelectedProject('');
-        setSelectedTask('');
-        setTaskDescription('');
-    }});
-    const [stopTimer] = useMutation(STOP_TIME_ENTRY, { onCompleted: () => {
-        refetchActiveEntry();
-        refetchTimeEntries();
-    }});
+    const [startTimer] = useMutation(START_TIME_ENTRY, { 
+        onCompleted: () => {
+            refetchActiveEntry();
+            refetchTimeEntries();
+            setSelectedProject('');
+            setSelectedTask('');
+            setTaskDescription('');
+        },
+        update: (cache) => {
+            cache.evict({ fieldName: 'activeTimeEntry' });
+            cache.evict({ fieldName: 'timeEntries' });
+            cache.evict({ fieldName: 'todayTimesheet' });
+        }
+    });
+    const [stopTimer] = useMutation(STOP_TIME_ENTRY, { 
+        onCompleted: () => {
+            refetchActiveEntry();
+            refetchTimeEntries();
+        },
+        update: (cache) => {
+            cache.evict({ fieldName: 'activeTimeEntry' });
+            cache.evict({ fieldName: 'timeEntries' });
+            cache.evict({ fieldName: 'todayTimesheet' });
+        }
+    });
 
     // Error handling effects
     useEffect(() => {
@@ -348,15 +421,23 @@ export default function TimeTrackerPage() {
     };
 
     const handleStartTimer = () => {
-        if (!selectedTask) {
+        // If user has assigned tasks, require task selection
+        if (hasAssignedTasks && !selectedTask) {
             alert('Please select a task before starting the timer');
             return;
         }
+        
+        // If user has no assigned tasks, require description
+        if (!hasAssignedTasks && !taskDescription.trim()) {
+            alert('Please describe what you are working on before starting the timer');
+            return;
+        }
+        
         startTimer({ 
             variables: { 
                 input: { 
-                    taskId: selectedTask,
-                    description: taskDescription || `Working on ${getProjectName(selectedProject)}`
+                    taskId: selectedTask || null, // Allow null when no tasks assigned
+                    description: taskDescription.trim() || `Working on ${getProjectName(selectedProject)}`
                 } 
             } 
         });
@@ -543,26 +624,53 @@ export default function TimeTrackerPage() {
                                             
                                             {/* Project and Task Selection */}
                                             <div className="space-y-4 mb-6">
-                                                <div>
-                                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                        Select Project
-                                                    </label>
-                                                    <select
-                                                        value={selectedProject}
-                                                        onChange={(e) => {
-                                                            setSelectedProject(e.target.value);
-                                                            setSelectedTask('');
-                                                        }}
-                                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                                                    >
-                                                        <option value="">Choose a project...</option>
-                                                        {projects.map((project: any) => (
-                                                            <option key={project.id} value={project.id}>
-                                                                {project.name}
-                                                            </option>
-                                                        ))}
-                                                    </select>
-                                                </div>
+                                                {!hasAssignedTasks ? (
+                                                    <>
+                                                        <div className="text-center py-8 px-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                                                            <InformationCircleIcon className="h-12 w-12 text-blue-600 dark:text-blue-400 mx-auto mb-3" />
+                                                            <p className="text-blue-800 dark:text-blue-200 font-medium">
+                                                                No tasks assigned to you
+                                                            </p>
+                                                            <p className="text-blue-700 dark:text-blue-300 text-sm mt-1">
+                                                                Describe what you're working on below
+                                                            </p>
+                                                        </div>
+                                                        
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                                                What are you working on?
+                                                            </label>
+                                                            <textarea
+                                                                value={taskDescription}
+                                                                onChange={(e) => setTaskDescription(e.target.value)}
+                                                                placeholder="Describe your work..."
+                                                                rows={3}
+                                                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                            />
+                                                        </div>
+                                                    </>
+                                                ) : (
+                                                    <>
+                                                        <div>
+                                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                                                                Select Project
+                                                            </label>
+                                                            <select
+                                                                value={selectedProject}
+                                                                onChange={(e) => {
+                                                                    setSelectedProject(e.target.value);
+                                                                    setSelectedTask('');
+                                                                }}
+                                                                className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                                            >
+                                                                <option value="">Choose a project...</option>
+                                                                {projects.map((project: any) => (
+                                                                    <option key={project.id} value={project.id}>
+                                                                        {project.name}
+                                                                    </option>
+                                                                ))}
+                                                            </select>
+                                                        </div>
                                                 
                                                 {selectedProject && (
                                                     <div>
@@ -583,24 +691,18 @@ export default function TimeTrackerPage() {
                                                         </select>
                                                     </div>
                                                 )}
-                                                
-                                                <div>
-                                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                                                        Description
-                                                    </label>
-                                                    <input
-                                                        type="text"
-                                                        value={taskDescription}
-                                                        onChange={(e) => setTaskDescription(e.target.value)}
-                                                        placeholder="What are you working on?"
-                                                        className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                                                    />
-                                                </div>
+                                                    </>
+                                                )}
                                             </div>
                                             
                                             <button
                                                 onClick={handleStartTimer}
-                                                className="w-full inline-flex items-center justify-center px-6 py-3 bg-green-600 hover:bg-green-700 text-white rounded-lg transition-colors"
+                                                disabled={!hasAssignedTasks && !taskDescription.trim()}
+                                                className={`w-full inline-flex items-center justify-center px-6 py-3 rounded-lg transition-colors ${
+                                                    (!hasAssignedTasks && !taskDescription.trim())
+                                                        ? 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed' 
+                                                        : 'bg-green-600 hover:bg-green-700 text-white'
+                                                }`}
                                             >
                                                 <PlayIcon className="h-5 w-5 mr-2" />
                                                 Start Timer

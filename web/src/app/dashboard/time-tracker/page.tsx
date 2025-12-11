@@ -49,6 +49,10 @@ export default function TimeTrackerPage() {
         fetchPolicy: 'network-only',
         notifyOnNetworkStatusChange: true
     });
+    
+    // Get current user ID for filtering
+    const currentUserId = meData?.me?.id;
+    
     const { data: activeEntryData, refetch: refetchActiveEntry, error: activeEntryError } = useQuery(GET_ACTIVE_TIME_ENTRY, {
         fetchPolicy: 'network-only',
         notifyOnNetworkStatusChange: true
@@ -58,12 +62,11 @@ export default function TimeTrackerPage() {
         notifyOnNetworkStatusChange: true
     });
     const { data: timeEntriesData, refetch: refetchTimeEntries, error: timeEntriesError } = useQuery(GET_TIME_ENTRIES, {
+        variables: { employeeId: currentUserId },
+        skip: !currentUserId,
         fetchPolicy: 'network-only',
         notifyOnNetworkStatusChange: true
     });
-    
-    // Get current user ID for filtering
-    const currentUserId = meData?.me?.id;
     
     // Get tasks assigned to current user
     const { data: myTasksData, error: myTasksError } = useQuery(GET_TASKS, {
@@ -112,7 +115,14 @@ export default function TimeTrackerPage() {
         }
     }, [currentUserId]);
 
-    
+    // Refetch all time-related data when user changes to ensure data isolation
+    useEffect(() => {
+        if (currentUserId) {
+            refetchActiveEntry();
+            refetchTodayTimesheet();
+            refetchTimeEntries();
+        }
+    }, [currentUserId, refetchActiveEntry, refetchTodayTimesheet, refetchTimeEntries]);
 
     // Calculate date ranges for week and month
     const getWeekStart = () => {
@@ -165,14 +175,26 @@ export default function TimeTrackerPage() {
     const monthTimesheetsData = null;
 
     // Mutations
-    const [checkIn] = useMutation(CHECK_IN, { onCompleted: () => {
-        refetchActiveEntry();
-        refetchTodayTimesheet();
-    }});
-    const [checkOut] = useMutation(CHECK_OUT, { onCompleted: () => {
-        refetchActiveEntry();
-        refetchTodayTimesheet();
-    }});
+    const [checkIn] = useMutation(CHECK_IN, { 
+        onCompleted: () => {
+            refetchActiveEntry();
+            refetchTodayTimesheet();
+        },
+        update: (cache) => {
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
+        }
+    });
+    const [checkOut] = useMutation(CHECK_OUT, { 
+        onCompleted: () => {
+            refetchActiveEntry();
+            refetchTodayTimesheet();
+        },
+        update: (cache) => {
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
+        }
+    });
     const [startTimer] = useMutation(START_TIME_ENTRY, { 
         onCompleted: () => {
             refetchActiveEntry();
@@ -182,9 +204,9 @@ export default function TimeTrackerPage() {
             setTaskDescription('');
         },
         update: (cache) => {
-            cache.evict({ fieldName: 'activeTimeEntry' });
-            cache.evict({ fieldName: 'timeEntries' });
-            cache.evict({ fieldName: 'todayTimesheet' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'timeEntries' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
         }
     });
     const [stopTimer] = useMutation(STOP_TIME_ENTRY, { 
@@ -193,9 +215,9 @@ export default function TimeTrackerPage() {
             refetchTimeEntries();
         },
         update: (cache) => {
-            cache.evict({ fieldName: 'activeTimeEntry' });
-            cache.evict({ fieldName: 'timeEntries' });
-            cache.evict({ fieldName: 'todayTimesheet' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'timeEntries' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
         }
     });
 

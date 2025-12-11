@@ -281,10 +281,58 @@ export const GET_TODAY_TIMESHEET = gql`
       totalHours
       status
       notes
+      sessionNumber
       employeeId
       createdAt
       updatedAt
+      employee {
+        id
+        name
+        email
+        workType
+      }
     }
+  }
+`;
+
+export const GET_TODAY_SESSIONS = gql`
+  query GetTodaySessions {
+    todaySessions {
+      id
+      date
+      checkIn
+      checkOut
+      totalHours
+      status
+      notes
+      sessionNumber
+      employeeId
+      createdAt
+      updatedAt
+      employee {
+        id
+        name
+        email
+        workType
+      }
+    }
+  }
+`;
+
+export const UPDATE_EMPLOYEE_WORK_TYPE = gql`
+  mutation UpdateEmployeeWorkType($workType: String!) {
+    updateEmployeeWorkType(workType: $workType) {
+      id
+      name
+      email
+      workType
+    }
+  }
+`;
+
+export const GET_EMPLOYEE_WORK_TYPE = gql`
+  query GetEmployeeWorkType {
+    employeeWorkType
   }
 `;
 

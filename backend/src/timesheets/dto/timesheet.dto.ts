@@ -1,8 +1,47 @@
 import { InputType, Field, ObjectType, registerEnumType } from '@nestjs/graphql';
 import { IsString, IsOptional } from 'class-validator';
-import { TimesheetStatus } from '@prisma/client';
+
+// Define enums locally since Prisma client generation is blocked
+export enum TimesheetStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED'
+}
+
+export enum WorkType {
+  REMOTE = 'REMOTE',
+  ONSITE = 'ONSITE'
+}
 
 registerEnumType(TimesheetStatus, { name: 'TimesheetStatus' });
+
+registerEnumType(WorkType, {
+  name: 'WorkType',
+  description: 'Employee work type classification',
+  valuesMap: {
+    REMOTE: {
+      description: 'Remote employee with flexible work hours',
+    },
+    ONSITE: {
+      description: 'Onsite employee with fixed work hours',
+    },
+  },
+});
+
+@ObjectType()
+export class EmployeeType {
+    @Field()
+    id: string;
+
+    @Field()
+    name: string;
+
+    @Field()
+    email: string;
+
+    @Field(() => WorkType, { nullable: true })
+    workType?: WorkType;
+}
 
 @InputType()
 export class StartTimeEntryInput {
@@ -44,10 +83,16 @@ export class TimesheetType {
     notes?: string;
 
     @Field()
+    sessionNumber: number;
+
+    @Field()
     createdAt: Date;
 
     @Field()
     updatedAt: Date;
+
+    @Field(() => EmployeeType, { nullable: true })
+    employee?: EmployeeType;
 }
 
 @ObjectType()

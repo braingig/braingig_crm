@@ -1,7 +1,8 @@
 'use client';
 
 import { useQuery, useMutation, useApolloClient } from '@apollo/client';
-import { GET_ACTIVE_TIME_ENTRY, GET_TODAY_TIMESHEET, GET_TIME_ENTRIES, GET_TIMESHEETS, CHECK_IN, CHECK_OUT, START_TIME_ENTRY, STOP_TIME_ENTRY, GET_PROJECTS, GET_TASKS, GET_ME } from '@/lib/graphql/queries';
+import { GET_ACTIVE_TIME_ENTRY, GET_TODAY_TIMESHEET, GET_TODAY_SESSIONS, GET_TIME_ENTRIES, GET_TIMESHEETS, CHECK_IN, CHECK_OUT, START_TIME_ENTRY, STOP_TIME_ENTRY, GET_PROJECTS, GET_TASKS, GET_ME, GET_EMPLOYEE_WORK_TYPE, UPDATE_EMPLOYEE_WORK_TYPE } from '@/lib/graphql/queries';
+import { WorkType } from '@/types';
 import { useState, useEffect } from 'react';
 import { 
     ClockIcon, 
@@ -20,7 +21,9 @@ import {
     XMarkIcon,
     CheckCircleIcon,
     ExclamationCircleIcon,
-    InformationCircleIcon
+    InformationCircleIcon,
+    ComputerDesktopIcon,
+    HomeIcon
 } from '@heroicons/react/24/outline';
 
 export default function TimeTrackerPage() {
@@ -40,6 +43,9 @@ export default function TimeTrackerPage() {
     });
     const [viewMode, setViewMode] = useState<'dashboard' | 'timesheet' | 'reports'>('dashboard');
     const [timesheetFilter, setTimesheetFilter] = useState<'today' | 'week' | 'month'>('week');
+    const [showWorkTypeSelector, setShowWorkTypeSelector] = useState(false);
+    const [showOnsiteCheckInToast, setShowOnsiteCheckInToast] = useState(false);
+    const [showCheckInSuccessToast, setShowCheckInSuccessToast] = useState(false);
 
     // Apollo Client for cache management
     const client = useApolloClient();
@@ -52,6 +58,18 @@ export default function TimeTrackerPage() {
     
     // Get current user ID for filtering
     const currentUserId = meData?.me?.id;
+
+    // Get employee work type
+    const { data: workTypeData, refetch: refetchWorkType } = useQuery(GET_EMPLOYEE_WORK_TYPE, {
+        fetchPolicy: 'network-only',
+        notifyOnNetworkStatusChange: true
+    });
+
+    // Get today's sessions for multiple check-ins
+    const { data: todaySessionsData, refetch: refetchTodaySessions } = useQuery(GET_TODAY_SESSIONS, {
+        fetchPolicy: 'network-only',
+        notifyOnNetworkStatusChange: true
+    });
     
     const { data: activeEntryData, refetch: refetchActiveEntry, error: activeEntryError } = useQuery(GET_ACTIVE_TIME_ENTRY, {
         fetchPolicy: 'network-only',
@@ -97,6 +115,8 @@ export default function TimeTrackerPage() {
 
     const activeEntry = activeEntryData?.activeTimeEntry;
     const todayTimesheet = todayTimesheetData?.todayTimesheet;
+    const todaySessions = todaySessionsData?.todaySessions || [];
+    const employeeWorkType = workTypeData?.employeeWorkType || WorkType.REMOTE;
     const allProjects = projectsData?.projects || [];
     const myTasks = myTasksData?.tasks || [];
     const tasks = tasksData?.tasks || [];
@@ -183,20 +203,37 @@ export default function TimeTrackerPage() {
         onCompleted: () => {
             refetchActiveEntry();
             refetchTodayTimesheet();
+            refetchTodaySessions();
+            setShowCheckInSuccessToast(true);
+            setTimeout(() => {
+                setShowCheckInSuccessToast(false);
+            }, 3000);
+        },
+        onError: (error) => {
+            // Check if it's the onsite employee check-in error
+            if (error.message.includes('Onsite employees can only check in once per day')) {
+                setShowOnsiteCheckInToast(true);
+                setTimeout(() => {
+                    setShowOnsiteCheckInToast(false);
+                }, 3000);
+            }
         },
         update: (cache) => {
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'todaySessions' });
         }
     });
     const [checkOut] = useMutation(CHECK_OUT, { 
         onCompleted: () => {
             refetchActiveEntry();
             refetchTodayTimesheet();
+            refetchTodaySessions();
         },
         update: (cache) => {
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'todaySessions' });
         }
     });
     const [startTimer] = useMutation(START_TIME_ENTRY, { 
@@ -222,6 +259,18 @@ export default function TimeTrackerPage() {
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'timeEntries' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
+        }
+    });
+
+    const [updateWorkType] = useMutation(UPDATE_EMPLOYEE_WORK_TYPE, {
+        onCompleted: () => {
+            refetchWorkType();
+            refetchTodaySessions();
+            setShowWorkTypeSelector(false);
+        },
+        update: (cache) => {
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'employeeWorkType' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'todaySessions' });
         }
     });
 
@@ -320,15 +369,17 @@ export default function TimeTrackerPage() {
     };
 
     const getAttendanceStatus = () => {
-        if (!todayTimesheet) {
-            return { status: 'Not Checked In', color: 'yellow', text: 'Pending', icon: ExclamationCircleIcon };
-        }
-        if (todayTimesheet.checkIn && !todayTimesheet.checkOut) {
+        const activeSession = todaySessions.find((session: any) => session.checkIn && !session.checkOut);
+        
+        if (activeSession) {
             return { status: 'Checked In', color: 'green', text: 'Active', icon: CheckCircleIcon };
         }
-        if (todayTimesheet.checkIn && todayTimesheet.checkOut) {
+        
+        const hasCompletedSessions = todaySessions.some((session: any) => session.checkIn && session.checkOut);
+        if (hasCompletedSessions) {
             return { status: 'Completed', color: 'blue', text: 'Done', icon: CheckCircleIcon };
         }
+        
         return { status: 'Not Checked In', color: 'yellow', text: 'Pending', icon: ExclamationCircleIcon };
     };
 
@@ -502,6 +553,22 @@ export default function TimeTrackerPage() {
         return task?.title || 'Unknown Task';
     };
 
+    const handleWorkTypeChange = (workType: WorkType) => {
+        console.log('Updating work type to:', workType);
+        updateWorkType({ 
+            variables: { workType: workType.toString() },
+            onError: (error) => {
+                console.error('GraphQL Error:', error);
+                console.error('Error details:', error.graphQLErrors);
+                console.error('Network error:', error.networkError);
+            }
+        });
+    };
+
+    const handleCheckIn = () => {
+        checkIn();
+    };
+
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
             {/* Header */}
@@ -515,6 +582,17 @@ export default function TimeTrackerPage() {
                             </p>
                         </div>
                         <div className="flex items-center space-x-4">
+                            <button
+                                onClick={() => setShowWorkTypeSelector(true)}
+                                className="inline-flex items-center px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
+                            >
+                                {employeeWorkType === WorkType.REMOTE ? (
+                                    <ComputerDesktopIcon className="h-5 w-5 mr-2" />
+                                ) : (
+                                    <HomeIcon className="h-5 w-5 mr-2" />
+                                )}
+                                {employeeWorkType === WorkType.REMOTE ? 'Remote' : 'Onsite'}
+                            </button>
                             <button
                                 onClick={() => setShowManualEntry(true)}
                                 className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
@@ -791,50 +869,103 @@ export default function TimeTrackerPage() {
 
                                         <div className="grid grid-cols-2 gap-4">
                                             <button
-                                                onClick={() => checkIn()}
-                                                disabled={todayTimesheet?.checkIn && !todayTimesheet?.checkOut}
+                                                onClick={handleCheckIn}
+                                                disabled={
+                                                    (employeeWorkType === WorkType.ONSITE && todaySessions.some((s: any) => s.checkIn && !s.checkOut)) ||
+                                                    (employeeWorkType === WorkType.REMOTE && todaySessions.some((s: any) => s.checkIn && !s.checkOut))
+                                                }
                                                 className={`inline-flex items-center justify-center px-4 py-3 rounded-lg font-medium transition-colors ${
-                                                    todayTimesheet?.checkIn && !todayTimesheet?.checkOut
+                                                    (employeeWorkType === WorkType.ONSITE && todaySessions.some((s: any) => s.checkIn && !s.checkOut)) ||
+                                                    (employeeWorkType === WorkType.REMOTE && todaySessions.some((s: any) => s.checkIn && !s.checkOut))
                                                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                                         : 'bg-blue-600 hover:bg-blue-700 text-white'
                                                 }`}
                                             >
-                                                Check In
+                                                <PlayIcon className="h-5 w-5 mr-2" />
+                                                {employeeWorkType === WorkType.ONSITE && todaySessions.some((s: any) => s.checkIn) 
+                                                    ? 'Already Checked In' 
+                                                    : 'Check In'
+                                                }
                                             </button>
                                             <button
                                                 onClick={() => checkOut()}
-                                                disabled={!todayTimesheet?.checkIn || todayTimesheet?.checkOut}
+                                                disabled={!todaySessions.some((s: any) => s.checkIn && !s.checkOut)}
                                                 className={`inline-flex items-center justify-center px-4 py-3 rounded-lg font-medium transition-colors ${
-                                                    !todayTimesheet?.checkIn || todayTimesheet?.checkOut
+                                                    !todaySessions.some((s: any) => s.checkIn && !s.checkOut)
                                                         ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
                                                         : 'bg-gray-600 hover:bg-gray-700 text-white'
                                                 }`}
                                             >
+                                                <StopIcon className="h-5 w-5 mr-2" />
                                                 Check Out
                                             </button>
                                         </div>
 
                                         <div className="border-t border-gray-200 dark:border-gray-700 pt-6">
-                                            <div className="grid grid-cols-2 gap-6">
-                                                <div className="text-center">
-                                                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Check In</p>
-                                                    <p className="text-xl font-semibold text-gray-900 dark:text-white">
-                                                        {formatTimeFromDate(todayTimesheet?.checkIn)}
-                                                    </p>
+                                            {employeeWorkType === WorkType.REMOTE && todaySessions.length > 0 ? (
+                                                <div>
+                                                    <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Today's Sessions</h4>
+                                                    <div className="space-y-2">
+                                                        {todaySessions.map((session: any, index: number) => (
+                                                            <div key={session.id} className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                                                                <div className="flex items-center space-x-3">
+                                                                    <div className="flex-shrink-0">
+                                                                        <div className={`w-2 h-2 rounded-full ${
+                                                                            session.checkIn && !session.checkOut 
+                                                                                ? 'bg-green-500' 
+                                                                                : 'bg-gray-400'
+                                                                        }`} />
+                                                                    </div>
+                                                                    <div>
+                                                                        <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                                                            Session {session.sessionNumber}
+                                                                        </p>
+                                                                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                                                                            {formatTimeFromDate(session.checkIn)} - {formatTimeFromDate(session.checkOut) || 'Active'}
+                                                                        </p>
+                                                                    </div>
+                                                                </div>
+                                                                <div className="text-right">
+                                                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                                                        {session.totalHours ? `${session.totalHours}h` : 'In progress'}
+                                                                    </p>
+                                                                </div>
+                                                            </div>
+                                                        ))}
+                                                    </div>
+                                                    {todaySessions.some((s: any) => s.totalHours) && (
+                                                        <div className="mt-4 text-center">
+                                                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Hours Today</p>
+                                                            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                                                                {todaySessions.reduce((sum: number, s: any) => sum + (s.totalHours || 0), 0).toFixed(2)}h
+                                                            </p>
+                                                        </div>
+                                                    )}
                                                 </div>
-                                                <div className="text-center">
-                                                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Check Out</p>
-                                                    <p className="text-xl font-semibold text-gray-900 dark:text-white">
-                                                        {formatTimeFromDate(todayTimesheet?.checkOut)}
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            {todayTimesheet?.totalHours && (
-                                                <div className="mt-6 text-center">
-                                                    <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Hours</p>
-                                                    <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                                                        {todayTimesheet.totalHours.toFixed(2)}h
-                                                    </p>
+                                            ) : (
+                                                <div>
+                                                    <div className="grid grid-cols-2 gap-6">
+                                                        <div className="text-center">
+                                                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Check In</p>
+                                                            <p className="text-xl font-semibold text-gray-900 dark:text-white">
+                                                                {formatTimeFromDate(todaySessions[0]?.checkIn)}
+                                                            </p>
+                                                        </div>
+                                                        <div className="text-center">
+                                                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Check Out</p>
+                                                            <p className="text-xl font-semibold text-gray-900 dark:text-white">
+                                                                {formatTimeFromDate(todaySessions[0]?.checkOut)}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    {todaySessions[0]?.totalHours && (
+                                                        <div className="mt-6 text-center">
+                                                            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Hours</p>
+                                                            <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                                                                {todaySessions[0].totalHours.toFixed(2)}h
+                                                            </p>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             )}
                                         </div>
@@ -1164,6 +1295,148 @@ export default function TimeTrackerPage() {
                                     className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
                                 >
                                     Add Entry
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Work Type Selector Modal */}
+            {showWorkTypeSelector && (
+                <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+                    <div className="bg-white dark:bg-gray-800 rounded-lg p-6 w-full max-w-md">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                                Select Work Type
+                            </h3>
+                            <button
+                                onClick={() => setShowWorkTypeSelector(false)}
+                                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                            >
+                                <XMarkIcon className="h-6 w-6" />
+                            </button>
+                        </div>
+                        
+                        <div className="space-y-4">
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                Choose your work type to determine check-in/check-out behavior:
+                            </p>
+                            
+                            <div className="space-y-3">
+                                <button
+                                    onClick={() => handleWorkTypeChange(WorkType.REMOTE)}
+                                    className={`w-full p-4 rounded-lg border-2 transition-all ${
+                                        employeeWorkType === WorkType.REMOTE
+                                            ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
+                                            : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center space-x-3">
+                                        <ComputerDesktopIcon className="h-8 w-8 text-purple-600 dark:text-purple-400" />
+                                        <div className="text-left">
+                                            <h4 className="font-semibold text-gray-900 dark:text-white">Remote Work</h4>
+                                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                                Multiple check-ins allowed, flexible hours
+                                            </p>
+                                        </div>
+                                    </div>
+                                </button>
+                                
+                                <button
+                                    onClick={() => handleWorkTypeChange(WorkType.ONSITE)}
+                                    className={`w-full p-4 rounded-lg border-2 transition-all ${
+                                        employeeWorkType === WorkType.ONSITE
+                                            ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
+                                            : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
+                                    }`}
+                                >
+                                    <div className="flex items-center space-x-3">
+                                        <HomeIcon className="h-8 w-8 text-purple-600 dark:text-purple-400" />
+                                        <div className="text-left">
+                                            <h4 className="font-semibold text-gray-900 dark:text-white">Onsite Work</h4>
+                                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                                Single check-in per day, fixed hours
+                                            </p>
+                                        </div>
+                                    </div>
+                                </button>
+                            </div>
+                            
+                            <div className="flex justify-end pt-4">
+                                <button
+                                    onClick={() => setShowWorkTypeSelector(false)}
+                                    className="px-4 py-2 text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 rounded-lg transition-colors"
+                                >
+                                    Cancel
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Check-in Success Toast Notification */}
+            {showCheckInSuccessToast && (
+                <div className="fixed bottom-4 right-4 z-50 animate-pulse">
+                    <div className="bg-green-50 border-l-4 border-green-400 p-4 rounded-lg shadow-lg max-w-sm">
+                        <div className="flex items-center">
+                            <div className="flex-shrink-0">
+                                <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                </svg>
+                            </div>
+                            <div className="ml-3">
+                                <p className="text-sm font-medium text-green-800">
+                                    Successfully Checked In
+                                </p>
+                                <p className="text-sm text-green-700 mt-1">
+                                    Your work session has started. Have a productive day!
+                                </p>
+                            </div>
+                            <div className="ml-auto pl-3">
+                                <button
+                                    onClick={() => setShowCheckInSuccessToast(false)}
+                                    className="inline-flex text-green-400 hover:text-green-600 focus:outline-none"
+                                >
+                                    <span className="sr-only">Dismiss</span>
+                                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Onsite Check-in Toast Notification */}
+            {showOnsiteCheckInToast && (
+                <div className="fixed bottom-4 right-4 z-50 animate-pulse">
+                    <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-lg shadow-lg max-w-sm">
+                        <div className="flex items-center">
+                            <div className="flex-shrink-0">
+                                <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                </svg>
+                            </div>
+                            <div className="ml-3">
+                                <p className="text-sm font-medium text-yellow-800">
+                                    Already Checked In
+                                </p>
+                                <p className="text-sm text-yellow-700 mt-1">
+                                    Onsite employees can only check in once per day. Please check out first.
+                                </p>
+                            </div>
+                            <div className="ml-auto pl-3">
+                                <button
+                                    onClick={() => setShowOnsiteCheckInToast(false)}
+                                    className="inline-flex text-yellow-400 hover:text-yellow-600 focus:outline-none"
+                                >
+                                    <span className="sr-only">Dismiss</span>
+                                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                    </svg>
                                 </button>
                             </div>
                         </div>

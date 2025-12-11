@@ -62,6 +62,13 @@ type Employee {
   salaryType: String
 }
 
+type EmployeeType {
+  email: String!
+  id: String!
+  name: String!
+  workType: WorkType
+}
+
 input LoginInput {
   email: String!
   password: String!
@@ -84,6 +91,7 @@ type Mutation {
   register(input: RegisterInput!): AuthResponse!
   startTimeEntry(input: StartTimeEntryInput!): TimeEntryType!
   stopTimeEntry: TimeEntryType!
+  updateEmployeeWorkType(workType: String!): EmployeeType!
   updateProject(id: String!, input: UpdateProjectInput!): ProjectType!
   updateTask(id: String!, input: UpdateTaskInput!): TaskType!
   updateUser(id: String!, input: UpdateUserInput!): UserType!
@@ -134,6 +142,7 @@ type ProjectType {
 
 type Query {
   activeTimeEntry: TimeEntryType
+  employeeWorkType: WorkType
   me: UserType!
   payrolls(employeeId: String): [Payroll!]!
   project(id: String!): ProjectType!
@@ -143,6 +152,7 @@ type Query {
   tasks(filters: TaskFiltersInput): [TaskType!]!
   timeEntries(employeeId: String, taskId: String): [TimeEntryType!]!
   timesheets(employeeId: String, endDate: DateTime, startDate: DateTime): [TimesheetType!]!
+  todaySessions: [TimesheetType!]!
   todayTimesheet: TimesheetType
   user(id: String!): UserType!
   users(filters: UserFiltersInput): [UserType!]!
@@ -255,9 +265,11 @@ type TimesheetType {
   checkOut: DateTime
   createdAt: DateTime!
   date: DateTime!
+  employee: EmployeeType
   employeeId: String!
   id: String!
   notes: String
+  sessionNumber: Float!
   status: TimesheetStatus!
   totalHours: Float!
   updatedAt: DateTime!
@@ -332,4 +344,13 @@ type UserType {
   skills: [String!]!
   status: String!
   updatedAt: DateTime!
+}
+
+"""Employee work type classification"""
+enum WorkType {
+  """Onsite employee with fixed work hours"""
+  ONSITE
+
+  """Remote employee with flexible work hours"""
+  REMOTE
 }

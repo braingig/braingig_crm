@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { WorkType } from './dto/timesheet.dto';
 
 @Injectable()
 export class TimesheetsService {
@@ -9,77 +10,122 @@ export class TimesheetsService {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        const existing = await this.prisma.timesheet.findUnique({
-            where: {
-                employeeId_date: {
-                    employeeId,
-                    date: today,
-                },
-            },
+        // Get employee to check work type
+        const employee = await (this.prisma as any).user.findUnique({ 
+            where: { id: employeeId }, 
+            select: { workType: true } 
         });
 
-        if (existing && existing.checkIn) {
-            throw new Error('Already checked in today');
+        if (!employee) {
+            throw new Error('Employee not found');
         }
 
-        return this.prisma.timesheet.upsert({
-            where: {
-                employeeId_date: {
+        if (employee.workType === WorkType.ONSITE) {
+            // Onsite employees can only check in once per day
+            const existing = await (this.prisma as any).timesheet.findFirst({
+                where: {
                     employeeId,
                     date: today,
+                    checkIn: { not: null }
+                }
+            });
+
+            if (existing) {
+                throw new Error('Onsite employees can only check in once per day');
+            }
+
+            return (this.prisma as any).timesheet.create({
+                data: {
+                    employeeId,
+                    date: today,
+                    checkIn: new Date(),
+                    sessionNumber: 1
                 },
-            },
-            update: {
-                checkIn: new Date(),
-            },
-            create: {
-                employeeId,
-                date: today,
-                checkIn: new Date(),
-            },
-            include: {
-                employee: {
-                    select: {
-                        id: true,
-                        name: true,
-                        email: true,
+                include: {
+                    employee: {
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            workType: true
+                        },
                     },
                 },
-            },
-        });
+            });
+        } else {
+            // Remote employees can check in multiple times per day
+            // Find the last session number for today
+            const lastSession = await (this.prisma as any).timesheet.findFirst({
+                where: {
+                    employeeId,
+                    date: today
+                },
+                orderBy: { sessionNumber: 'desc' }
+            });
+
+            const sessionNumber = lastSession ? lastSession.sessionNumber + 1 : 1;
+
+            // Check if there's an active session (checked in but not checked out)
+            const activeSession = await (this.prisma as any).timesheet.findFirst({
+                where: {
+                    employeeId,
+                    date: today,
+                    checkIn: { not: null },
+                    checkOut: null
+                }
+            });
+
+            if (activeSession) {
+                throw new Error('Please check out from your current session before checking in again');
+            }
+
+            return (this.prisma as any).timesheet.create({
+                data: {
+                    employeeId,
+                    date: today,
+                    checkIn: new Date(),
+                    sessionNumber
+                },
+                include: {
+                    employee: {
+                        select: {
+                            id: true,
+                            name: true,
+                            email: true,
+                            workType: true
+                        },
+                    },
+                },
+            });
+        }
     }
 
     async checkOut(employeeId: string) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        const timesheet = await this.prisma.timesheet.findUnique({
+        // Find the most recent active session (checked in but not checked out)
+        const activeSession = await (this.prisma as any).timesheet.findFirst({
             where: {
-                employeeId_date: {
-                    employeeId,
-                    date: today,
-                },
+                employeeId,
+                date: today,
+                checkIn: { not: null },
+                checkOut: null
             },
+            orderBy: { sessionNumber: 'desc' }
         });
 
-        if (!timesheet || !timesheet.checkIn) {
-            throw new Error('No check-in found for today');
-        }
-
-        if (timesheet.checkOut) {
-            throw new Error('Already checked out today');
+        if (!activeSession) {
+            throw new Error('No active check-in found for today');
         }
 
         const checkOut = new Date();
         const totalHours =
-            (checkOut.getTime() - timesheet.checkIn.getTime()) / (1000 * 60 * 60);
+            (checkOut.getTime() - activeSession.checkIn.getTime()) / (1000 * 60 * 60);
 
-        return this.prisma.timesheet.update({
+        return (this.prisma as any).timesheet.update({
             where: {
-                employeeId_date: {
-                    employeeId,
-                    date: today,
-                },
+                id: activeSession.id
             },
             data: {
                 checkOut,
@@ -91,6 +137,7 @@ export class TimesheetsService {
                         id: true,
                         name: true,
                         email: true,
+                        workType: true
                     },
                 },
             },
@@ -99,7 +146,7 @@ export class TimesheetsService {
 
     async startTimeEntry(employeeId: string, taskId?: string, description?: string) {
         // Check if there's already an active time entry
-        const activeEntry = await this.prisma.timeEntry.findFirst({
+        const activeEntry = await (this.prisma as any).timeEntry.findFirst({
             where: {
                 employeeId,
                 endTime: null,
@@ -110,7 +157,7 @@ export class TimesheetsService {
             throw new Error('You already have an active timer running');
         }
 
-        return this.prisma.timeEntry.create({
+        return (this.prisma as any).timeEntry.create({
             data: {
                 employeeId,
                 taskId,
@@ -135,7 +182,7 @@ export class TimesheetsService {
     }
 
     async stopTimeEntry(employeeId: string) {
-        const activeEntry = await this.prisma.timeEntry.findFirst({
+        const activeEntry = await (this.prisma as any).timeEntry.findFirst({
             where: {
                 employeeId,
                 endTime: null,
@@ -151,7 +198,7 @@ export class TimesheetsService {
             (endTime.getTime() - activeEntry.startTime.getTime()) / (1000 * 60),
         );
 
-        const updatedEntry = await this.prisma.timeEntry.update({
+        const updatedEntry = await (this.prisma as any).timeEntry.update({
             where: { id: activeEntry.id },
             data: {
                 endTime,
@@ -164,7 +211,7 @@ export class TimesheetsService {
 
         // Update task time spent if task is associated
         if (activeEntry.taskId) {
-            await this.prisma.task.update({
+            await (this.prisma as any).task.update({
                 where: { id: activeEntry.taskId },
                 data: {
                     timeSpent: {
@@ -178,7 +225,7 @@ export class TimesheetsService {
     }
 
     async getTimesheets(employeeId?: string, startDate?: Date, endDate?: Date) {
-        return this.prisma.timesheet.findMany({
+        return (this.prisma as any).timesheet.findMany({
             where: {
                 ...(employeeId && { employeeId }),
                 ...(startDate && endDate && {
@@ -205,7 +252,7 @@ export class TimesheetsService {
     }
 
     async getTimeEntries(employeeId?: string, taskId?: string) {
-        return this.prisma.timeEntry.findMany({
+        return (this.prisma as any).timeEntry.findMany({
             where: {
                 ...(employeeId && { employeeId }),
                 ...(taskId && { taskId }),
@@ -237,7 +284,7 @@ export class TimesheetsService {
     }
 
     async getActiveTimeEntry(employeeId: string) {
-        return this.prisma.timeEntry.findFirst({
+        return (this.prisma as any).timeEntry.findFirst({
             where: {
                 employeeId,
                 endTime: null,
@@ -256,7 +303,7 @@ export class TimesheetsService {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
 
-        return this.prisma.timesheet.findFirst({
+        return (this.prisma as any).timesheet.findFirst({
             where: {
                 employeeId,
                 date: today,
@@ -267,9 +314,56 @@ export class TimesheetsService {
                         id: true,
                         name: true,
                         email: true,
+                        workType: true
                     },
                 },
             },
         });
+    }
+
+    async getTodaySessions(employeeId: string) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+
+        return (this.prisma as any).timesheet.findMany({
+            where: {
+                employeeId,
+                date: today,
+            },
+            include: {
+                employee: {
+                    select: {
+                        id: true,
+                        name: true,
+                        email: true,
+                        workType: true
+                    },
+                },
+            },
+            orderBy: {
+                sessionNumber: 'asc'
+            }
+        });
+    }
+
+    async updateEmployeeWorkType(employeeId: string, workType: WorkType) {
+        return (this.prisma as any).user.update({
+        where: { id: employeeId },
+        data: { workType },
+        select: {
+            id: true,
+            name: true,
+            email: true,
+            workType: true
+        }
+    });
+    }
+
+    async getEmployeeWorkType(employeeId: string) {
+        const employee = await (this.prisma as any).user.findUnique({
+            where: { id: employeeId },
+            select: { workType: true }
+        });
+        return employee?.workType;
     }
 }

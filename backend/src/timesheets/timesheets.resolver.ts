@@ -3,7 +3,7 @@ import { UseGuards } from '@nestjs/common';
 import { TimesheetsService } from './timesheets.service';
 import { GqlAuthGuard } from '../auth/guards/gql-auth.guard';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
-import { TimesheetType, TimeEntryType, StartTimeEntryInput } from './dto/timesheet.dto';
+import { TimesheetType, TimeEntryType, StartTimeEntryInput, WorkType, EmployeeType } from './dto/timesheet.dto';
 
 @Resolver()
 export class TimesheetsResolver {
@@ -69,5 +69,28 @@ export class TimesheetsResolver {
     @UseGuards(GqlAuthGuard)
     async todayTimesheet(@CurrentUser() user: any) {
         return this.timesheetsService.getTodayTimesheet(user.userId);
+    }
+
+    @Query(() => [TimesheetType])
+    @UseGuards(GqlAuthGuard)
+    async todaySessions(@CurrentUser() user: any) {
+        return this.timesheetsService.getTodaySessions(user.userId);
+    }
+
+    @Mutation(() => EmployeeType)
+    @UseGuards(GqlAuthGuard)
+    async updateEmployeeWorkType(
+        @CurrentUser() user: any,
+        @Args('workType') workType: string
+    ) {
+        // Convert string to WorkType enum
+        const workTypeEnum = workType as WorkType;
+        return this.timesheetsService.updateEmployeeWorkType(user.userId, workTypeEnum);
+    }
+
+    @Query(() => WorkType, { nullable: true })
+    @UseGuards(GqlAuthGuard)
+    async employeeWorkType(@CurrentUser() user: any) {
+        return this.timesheetsService.getEmployeeWorkType(user.userId);
     }
 }

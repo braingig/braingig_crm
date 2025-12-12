@@ -46,6 +46,9 @@ export default function TimeTrackerPage() {
     const [showWorkTypeSelector, setShowWorkTypeSelector] = useState(false);
     const [showOnsiteCheckInToast, setShowOnsiteCheckInToast] = useState(false);
     const [showCheckInSuccessToast, setShowCheckInSuccessToast] = useState(false);
+    const [isMouseActive, setIsMouseActive] = useState(true);
+    const [lastMouseActivity, setLastMouseActivity] = useState(Date.now());
+    const [isTimerPaused, setIsTimerPaused] = useState(false);
 
     // Apollo Client for cache management
     const client = useApolloClient();
@@ -305,9 +308,53 @@ export default function TimeTrackerPage() {
         }
     }, [tasksError]);
 
+    // Mouse activity detection
+    useEffect(() => {
+        const handleMouseActivity = () => {
+            const now = Date.now();
+            setLastMouseActivity(now);
+            setIsMouseActive(true);
+            
+            // Resume timer if it was paused due to inactivity
+            if (isTimerPaused && activeEntry) {
+                setIsTimerPaused(false);
+            }
+        };
+
+        const events = ['mousemove', 'mousedown', 'keypress', 'scroll', 'touchstart', 'click'];
+        
+        events.forEach(event => {
+            document.addEventListener(event, handleMouseActivity);
+        });
+
+        return () => {
+            events.forEach(event => {
+                document.removeEventListener(event, handleMouseActivity);
+            });
+        };
+    }, [isTimerPaused, activeEntry]);
+
+    // Check for mouse inactivity
+    useEffect(() => {
+        if (!activeEntry) return;
+
+        const inactivityCheck = setInterval(() => {
+            const now = Date.now();
+            const inactiveTime = now - lastMouseActivity;
+            
+            // Pause timer after 1 minute of inactivity (60000 ms)
+            if (inactiveTime >= 60000 && !isTimerPaused) {
+                setIsTimerPaused(true);
+                setIsMouseActive(false);
+            }
+        }, 1000);
+
+        return () => clearInterval(inactivityCheck);
+    }, [activeEntry, lastMouseActivity, isTimerPaused]);
+
     // Timer effect
     useEffect(() => {
-        if (activeEntry) {
+        if (activeEntry && !isTimerPaused) {
             const interval = setInterval(() => {
                 const start = new Date(activeEntry.startTime).getTime();
                 const now = new Date().getTime();
@@ -315,7 +362,7 @@ export default function TimeTrackerPage() {
             }, 1000);
             return () => clearInterval(interval);
         }
-    }, [activeEntry]);
+    }, [activeEntry, isTimerPaused]);
 
     // Utility functions
     const formatTime = (seconds: number) => {

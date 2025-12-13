@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
+import { View, StyleSheet, AppState } from 'react-native';
 import { Card, Text, Button } from 'react-native-paper';
 
 export default function TimeTrackerScreen() {
@@ -7,13 +7,28 @@ export default function TimeTrackerScreen() {
     const [elapsed, setElapsed] = React.useState(0);
 
     React.useEffect(() => {
-        let interval: NodeJS.Timeout;
+        let interval: ReturnType<typeof setInterval>;
         if (isTracking) {
             interval = setInterval(() => {
                 setElapsed((prev) => prev + 1);
             }, 1000);
         }
         return () => clearInterval(interval);
+    }, [isTracking]);
+
+    // Stop timer when app goes to background
+    React.useEffect(() => {
+        const handleAppStateChange = (nextAppState: string) => {
+            if (nextAppState === 'background' && isTracking) {
+                setIsTracking(false);
+            }
+        };
+
+        const subscription = AppState.addEventListener('change', handleAppStateChange);
+
+        return () => {
+            subscription?.remove();
+        };
     }, [isTracking]);
 
     const formatTime = (seconds: number) => {

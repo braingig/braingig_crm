@@ -440,6 +440,25 @@ export default function TimeTrackerPage() {
         }
     }, [activeEntry, isTimerPaused, accumulatedTime]);
 
+    // Stop timer when user closes browser window or navigates away
+    useEffect(() => {
+        if (!activeEntry) return;
+
+        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+            // Stop the timer before the page unloads
+            stopTimer();
+            // Don't show a confirmation dialog - just let the browser close
+            e.preventDefault();
+            e.returnValue = '';
+        };
+
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
+        return () => {
+            window.removeEventListener('beforeunload', handleBeforeUnload);
+        };
+    }, [activeEntry, stopTimer]);
+
     // Utility functions
     const formatTime = (seconds: number) => {
         const hours = Math.floor(seconds / 3600);

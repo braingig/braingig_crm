@@ -3,13 +3,25 @@
 import { BellIcon, UserCircleIcon, ArrowRightOnRectangleIcon } from '@heroicons/react/24/outline';
 import { useAuthStore } from '@/lib/store';
 import { useRouter } from 'next/navigation';
+import { useMutation } from '@apollo/client';
+import { LOGOUT_MUTATION } from '@/lib/graphql/queries';
 
 export default function Header() {
     const user = useAuthStore((state) => state.user);
     const logout = useAuthStore((state) => state.logout);
     const router = useRouter();
+    const [logoutMutation] = useMutation(LOGOUT_MUTATION);
 
-    const handleLogout = () => {
+    const handleLogout = async () => {
+        try {
+            // Call backend logout to stop any active timers
+            await logoutMutation();
+        } catch (error) {
+            console.error('Logout error:', error);
+            // Continue with local logout even if backend fails
+        }
+        
+        // Clear local auth state
         logout();
         router.push('/login');
     };

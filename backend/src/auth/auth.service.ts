@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcrypt';
 import { PrismaService } from '../prisma/prisma.service';
 import { User } from '@prisma/client';
+import { TimesheetsService } from '../timesheets/timesheets.service';
 
 @Injectable()
 export class AuthService {
@@ -11,6 +12,7 @@ export class AuthService {
         private prisma: PrismaService,
         private jwtService: JwtService,
         private config: ConfigService,
+        private timesheetsService: TimesheetsService,
     ) { }
 
     async validateUser(email: string, password: string): Promise<User | null> {
@@ -139,6 +141,14 @@ export class AuthService {
     }
 
     async logout(userId: string) {
+        // Stop any active time entries when user logs out
+        try {
+            await this.timesheetsService.stopTimeEntry(userId);
+        } catch (error) {
+            // Log error but don't fail logout if no active timer exists
+            console.error('Error stopping active time entry during logout:', error);
+        }
+
         await this.prisma.user.update({
             where: { id: userId },
             data: { refreshToken: null },

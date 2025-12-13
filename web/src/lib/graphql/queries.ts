@@ -401,6 +401,12 @@ export const REFRESH_TOKEN = gql`
   }
 `;
 
+export const LOGOUT_MUTATION = gql`
+  mutation Logout {
+    logout
+  }
+`;
+
 export const UPDATE_PROJECT = gql`
   mutation UpdateProject($id: String!, $input: UpdateProjectInput!) {
     updateProject(id: $id, input: $input) {

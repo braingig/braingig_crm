@@ -332,7 +332,7 @@ export default function TimeTrackerPage() {
         }
     }, [isTimerPaused, activeEntry, pauseStartTime]);
 
-    // Page visibility detection - tracks when user is working in other apps
+    // Page visibility detection - tracks when user returns to browser tab
     useEffect(() => {
         if (!activeEntry) return;
 
@@ -340,20 +340,19 @@ export default function TimeTrackerPage() {
             const isVisible = !document.hidden;
             setIsTabVisible(isVisible);
             
-            // If tab becomes visible, update activity timestamp
+            // When user returns to the tab, treat it as activity and resume timer
             if (isVisible) {
                 setLastActivity(Date.now());
-                // Resume timer if it was paused due to inactivity
                 if (isTimerPaused) {
                     setIsTimerPaused(false);
                 }
             }
         };
 
-        // Listen for page visibility changes
+        // Listen for page visibility changes (tab switching, minimizing browser)
         document.addEventListener('visibilitychange', handleVisibilityChange);
         
-        // Also listen for window focus/blur events
+        // Also listen for window focus/blur events (switching between browser windows)
         const handleFocus = () => {
             setIsTabVisible(true);
             setLastActivity(Date.now());
@@ -376,7 +375,7 @@ export default function TimeTrackerPage() {
         };
     }, [activeEntry, isTimerPaused]);
 
-    // Mouse activity detection - detects when user is at computer
+    // User activity detection - detects mouse, keyboard, and touch interactions
     useEffect(() => {
         if (!activeEntry) return;
 
@@ -390,11 +389,20 @@ export default function TimeTrackerPage() {
             }
         };
 
-        // Listen for all mouse and keyboard activity on the document
+        // Listen for comprehensive user activity events
         const events = [
-            'mousemove', 'mousedown', 'mouseup', 'click', 'dblclick',
+            // Mouse events
+            'mousemove', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu',
+            // Keyboard events  
             'keypress', 'keydown', 'keyup',
-            'scroll', 'wheel', 'touchstart', 'touchend', 'touchmove'
+            // Touch events for mobile devices
+            'touchstart', 'touchend', 'touchmove', 'touchcancel',
+            // Scroll and wheel events
+            'scroll', 'wheel',
+            // Form interactions
+            'input', 'change', 'focus', 'blur',
+            // Drag and drop
+            'dragstart', 'dragend', 'drop'
         ];
         
         events.forEach(event => {
@@ -408,7 +416,7 @@ export default function TimeTrackerPage() {
         };
     }, [activeEntry, isTimerPaused]);
 
-    // Hybrid inactivity detection - combines tab visibility and mouse activity
+    // Universal inactivity detection - works regardless of tab visibility
     useEffect(() => {
         if (!activeEntry) return;
 
@@ -416,15 +424,15 @@ export default function TimeTrackerPage() {
             const now = Date.now();
             const inactiveTime = now - lastActivity;
             
-            // Only pause if tab is visible (user is at computer but inactive)
-            // If tab is not visible, assume user is working in other apps
-            if (isTabVisible && inactiveTime >= 60000 && !isTimerPaused) {
+            // Pause timer if user has been inactive for 1 minute (60,000 ms)
+            // This works whether user is in browser or switched to other apps
+            if (inactiveTime >= 60000 && !isTimerPaused) {
                 setIsTimerPaused(true);
             }
         }, 1000);
 
         return () => clearInterval(inactivityCheck);
-    }, [activeEntry, lastActivity, isTimerPaused, isTabVisible]);
+    }, [activeEntry, lastActivity, isTimerPaused]);
 
     // Timer effect - respects pause state
     useEffect(() => {
@@ -928,6 +936,22 @@ export default function TimeTrackerPage() {
                                             <div className="text-6xl font-bold text-gray-900 dark:text-white mb-4 font-mono">
                                                 {formatTime(elapsed)}
                                             </div>
+                                            
+                                            {/* Inactivity indicator */}
+                                            {isTimerPaused && (
+                                                <div className="mb-4 p-3 bg-yellow-100 dark:bg-yellow-900 border border-yellow-300 dark:border-yellow-700 rounded-lg">
+                                                    <div className="flex items-center justify-center space-x-2">
+                                                        <PauseIcon className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
+                                                        <span className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
+                                                            Timer paused due to inactivity
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1 text-center">
+                                                        Move your mouse or press any key to resume
+                                                    </p>
+                                                </div>
+                                            )}
+                                            
                                             <div className="mb-6">
                                                 <p className="text-lg text-gray-600 dark:text-gray-400 mb-2">
                                                     {activeEntry.description || 'Working...'}

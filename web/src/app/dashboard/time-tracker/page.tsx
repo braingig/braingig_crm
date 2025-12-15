@@ -445,17 +445,87 @@ export default function TimeTrackerPage() {
         if (!activeEntry) return;
 
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            // Stop the timer before the page unloads
-            stopTimer();
-            // Don't show a confirmation dialog - just let the browser close
-            e.preventDefault();
-            e.returnValue = '';
+            // Use fetch with keepalive to stop timer reliably during page unload
+            const token = localStorage.getItem('accessToken');
+            if (token && activeEntry?.id) {
+                const data = JSON.stringify({
+                    query: `
+                        mutation StopTimeEntry {
+                            stopTimeEntry {
+                                id
+                                startTime
+                                endTime
+                                duration
+                                description
+                                taskId
+                                employeeId
+                                isManual
+                                createdAt
+                            }
+                        }
+                    `
+                });
+
+                // Use fetch with keepalive for reliable delivery during page unload
+                const graphqlEndpoint = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/graphql';
+                fetch(graphqlEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: data,
+                    keepalive: true // Ensures request completes even when page is unloading
+                }).catch(() => {
+                    // Silently ignore errors during unload
+                });
+            }
+            // No browser alert - just silently stop timer in background
+        };
+
+        // Handle pagehide event as additional fallback for browser close
+        const handlePageHide = (e: PageTransitionEvent) => {
+            const token = localStorage.getItem('accessToken');
+            if (token && activeEntry?.id) {
+                const data = JSON.stringify({
+                    query: `
+                        mutation StopTimeEntry {
+                            stopTimeEntry {
+                                id
+                                startTime
+                                endTime
+                                duration
+                                description
+                                taskId
+                                employeeId
+                                isManual
+                                createdAt
+                            }
+                        }
+                    `
+                });
+
+                const graphqlEndpoint = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/graphql';
+                fetch(graphqlEndpoint, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: data,
+                    keepalive: true
+                }).catch(() => {
+                    // Silently ignore errors during page hide
+                });
+            }
         };
 
         window.addEventListener('beforeunload', handleBeforeUnload);
+        window.addEventListener('pagehide', handlePageHide);
 
         return () => {
             window.removeEventListener('beforeunload', handleBeforeUnload);
+            window.removeEventListener('pagehide', handlePageHide);
         };
     }, [activeEntry, stopTimer]);
 

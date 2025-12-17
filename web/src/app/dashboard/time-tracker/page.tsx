@@ -46,11 +46,13 @@ export default function TimeTrackerPage() {
     const [showWorkTypeSelector, setShowWorkTypeSelector] = useState(false);
     const [showOnsiteCheckInToast, setShowOnsiteCheckInToast] = useState(false);
     const [showCheckInSuccessToast, setShowCheckInSuccessToast] = useState(false);
-    const [isTimerPaused, setIsTimerPaused] = useState(false);
     const [lastActivity, setLastActivity] = useState(Date.now());
-    const [accumulatedTime, setAccumulatedTime] = useState(0);
+    const [isTimerPaused, setIsTimerPaused] = useState(false);
     const [pauseStartTime, setPauseStartTime] = useState<number | null>(null);
+    const [accumulatedTime, setAccumulatedTime] = useState(0);
     const [isTabVisible, setIsTabVisible] = useState(true);
+    const [isStopping, setIsStopping] = useState(false);
+
 
 
     // Apollo Client for cache management
@@ -260,6 +262,7 @@ export default function TimeTrackerPage() {
         onCompleted: () => {
             refetchActiveEntry();
             refetchTimeEntries();
+            setIsStopping(false); // Reset stopping flag after successful stop
         },
         update: (cache) => {
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
@@ -311,23 +314,34 @@ export default function TimeTrackerPage() {
         }
     }, [tasksError]);
 
-    // Handle timer pause/resume logic
+    // Initialize timer when active entry starts
     useEffect(() => {
-        if (!activeEntry) {
+        if (activeEntry) {
+            // New active entry started, reset accumulated time
+            setAccumulatedTime(0);
+            setIsTimerPaused(false);
+            setPauseStartTime(null);
+            setIsStopping(false); // Reset stopping flag for new timer
+        } else {
             // Reset when no active entry
             setAccumulatedTime(0);
             setPauseStartTime(null);
             setIsTimerPaused(false);
-            return;
+            setIsStopping(false);
         }
+    }, [activeEntry?.id]); // Only re-run when active entry ID changes
+
+    // Handle timer pause/resume logic
+    useEffect(() => {
+        if (!activeEntry) return;
 
         if (isTimerPaused && !pauseStartTime) {
-            // Timer just paused
+            // Timer just paused - record the pause start time
             setPauseStartTime(Date.now());
         } else if (!isTimerPaused && pauseStartTime) {
-            // Timer just resumed
-            const pauseDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
-            setAccumulatedTime(prev => prev + pauseDuration);
+            // Timer just resumed - add the inactive period to accumulated time
+            const inactiveDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
+            setAccumulatedTime(prev => prev + inactiveDuration);
             setPauseStartTime(null);
         }
     }, [isTimerPaused, activeEntry, pauseStartTime]);
@@ -342,7 +356,8 @@ export default function TimeTrackerPage() {
             
             // When user returns to the tab, treat it as activity and resume timer
             if (isVisible) {
-                setLastActivity(Date.now());
+                const now = Date.now();
+                setLastActivity(now);
                 if (isTimerPaused) {
                     setIsTimerPaused(false);
                 }
@@ -354,8 +369,9 @@ export default function TimeTrackerPage() {
         
         // Also listen for window focus/blur events (switching between browser windows)
         const handleFocus = () => {
+            const now = Date.now();
             setIsTabVisible(true);
-            setLastActivity(Date.now());
+            setLastActivity(now);
             if (isTimerPaused) {
                 setIsTimerPaused(false);
             }
@@ -379,14 +395,25 @@ export default function TimeTrackerPage() {
     useEffect(() => {
         if (!activeEntry) return;
 
+        let activityTimeout: NodeJS.Timeout;
+
         const handleActivity = () => {
             const now = Date.now();
-            setLastActivity(now);
             
-            // Resume timer if it was paused due to inactivity
-            if (isTimerPaused) {
-                setIsTimerPaused(false);
+            // Clear any pending activity timeout
+            if (activityTimeout) {
+                clearTimeout(activityTimeout);
             }
+            
+            // Debounce activity updates to prevent too frequent calls
+            activityTimeout = setTimeout(() => {
+                setLastActivity(now);
+                
+                // Auto-resume timer if it was paused due to inactivity
+                if (isTimerPaused) {
+                    setIsTimerPaused(false);
+                }
+            }, 100); // 100ms debounce
         };
 
         // Listen for comprehensive user activity events
@@ -410,6 +437,10 @@ export default function TimeTrackerPage() {
         });
 
         return () => {
+            // Clear activity timeout
+            if (activityTimeout) {
+                clearTimeout(activityTimeout);
+            }
             events.forEach(event => {
                 document.removeEventListener(event, handleActivity, true);
             });
@@ -424,8 +455,7 @@ export default function TimeTrackerPage() {
             const now = Date.now();
             const inactiveTime = now - lastActivity;
             
-            // Pause timer if user has been inactive for 1 minute (60,000 ms)
-            // This works whether user is in browser or switched to other apps
+            // PAUSE timer if user has been inactive for 1 minute (60,000 ms)
             if (inactiveTime >= 60000 && !isTimerPaused) {
                 setIsTimerPaused(true);
             }
@@ -434,19 +464,26 @@ export default function TimeTrackerPage() {
         return () => clearInterval(inactivityCheck);
     }, [activeEntry, lastActivity, isTimerPaused]);
 
-    // Timer effect - respects pause state
+    // Timer effect - counts total elapsed time minus inactive periods
     useEffect(() => {
         if (activeEntry && !isTimerPaused) {
             const interval = setInterval(() => {
                 const start = new Date(activeEntry.startTime).getTime();
-                const now = new Date().getTime();
+                const now = Date.now();
                 const totalElapsed = Math.floor((now - start) / 1000);
                 const adjustedElapsed = totalElapsed - accumulatedTime;
                 setElapsed(Math.max(0, adjustedElapsed));
             }, 1000);
             return () => clearInterval(interval);
+        } else if (activeEntry && isTimerPaused) {
+            // When paused, show the elapsed time minus accumulated inactive time
+            const start = new Date(activeEntry.startTime).getTime();
+            const pauseTime = pauseStartTime || Date.now();
+            const totalElapsed = Math.floor((pauseTime - start) / 1000);
+            const adjustedElapsed = totalElapsed - accumulatedTime;
+            setElapsed(Math.max(0, adjustedElapsed));
         }
-    }, [activeEntry, isTimerPaused, accumulatedTime]);
+    }, [activeEntry, isTimerPaused, accumulatedTime, pauseStartTime]);
 
     // Stop timer when user closes browser window or navigates away
     useEffect(() => {
@@ -455,7 +492,8 @@ export default function TimeTrackerPage() {
         const handleBeforeUnload = (e: BeforeUnloadEvent) => {
             // Use fetch with keepalive to stop timer reliably during page unload
             const token = localStorage.getItem('accessToken');
-            if (token && activeEntry?.id) {
+            if (token && activeEntry?.id && !isStopping) {
+                setIsStopping(true);
                 const data = JSON.stringify({
                     query: `
                         mutation StopTimeEntry {
@@ -494,7 +532,8 @@ export default function TimeTrackerPage() {
         // Handle pagehide event as additional fallback for browser close
         const handlePageHide = (e: PageTransitionEvent) => {
             const token = localStorage.getItem('accessToken');
-            if (token && activeEntry?.id) {
+            if (token && activeEntry?.id && !isStopping) {
+                setIsStopping(true);
                 const data = JSON.stringify({
                     query: `
                         mutation StopTimeEntry {
@@ -952,6 +991,7 @@ export default function TimeTrackerPage() {
                                                 </div>
                                             )}
                                             
+
                                             <div className="mb-6">
                                                 <p className="text-lg text-gray-600 dark:text-gray-400 mb-2">
                                                     {activeEntry.description || 'Working...'}

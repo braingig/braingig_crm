@@ -52,6 +52,11 @@ export default function TimeTrackerPage() {
     const [accumulatedTime, setAccumulatedTime] = useState(0);
     const [isTabVisible, setIsTabVisible] = useState(true);
     const [isStopping, setIsStopping] = useState(false);
+    const [timerStatus, setTimerStatus] = useState<'running' | 'paused' | 'idle'>('running');
+    const [idleThreshold, setIdleThreshold] = useState(60000); // 1 minute default
+    const [showIdleNotification, setShowIdleNotification] = useState(false);
+    const [idleStartTime, setIdleStartTime] = useState<number | null>(null);
+    const [showIdleSettings, setShowIdleSettings] = useState(false);
 
 
 
@@ -331,20 +336,31 @@ export default function TimeTrackerPage() {
         }
     }, [activeEntry?.id]); // Only re-run when active entry ID changes
 
-    // Handle timer pause/resume logic
+    // Enhanced timer pause/resume logic with accurate time calculation
     useEffect(() => {
         if (!activeEntry) return;
 
         if (isTimerPaused && !pauseStartTime) {
             // Timer just paused - record the pause start time
-            setPauseStartTime(Date.now());
+            const now = Date.now();
+            setPauseStartTime(now);
+            if (timerStatus === 'idle') {
+                setIdleStartTime(now);
+            }
         } else if (!isTimerPaused && pauseStartTime) {
-            // Timer just resumed - add the inactive period to accumulated time
-            const inactiveDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
-            setAccumulatedTime(prev => prev + inactiveDuration);
+            // Timer just resumed - calculate and add the inactive period to accumulated time
+            const now = Date.now();
+            const inactiveDuration = Math.floor((now - pauseStartTime) / 1000);
+            
+            if (inactiveDuration > 0) {
+                setAccumulatedTime(prev => prev + inactiveDuration);
+            }
+            
             setPauseStartTime(null);
+            setIdleStartTime(null);
+            setTimerStatus('running');
         }
-    }, [isTimerPaused, activeEntry, pauseStartTime]);
+    }, [isTimerPaused, activeEntry, pauseStartTime, timerStatus]);
 
     // Page visibility detection - tracks when user returns to browser tab
     useEffect(() => {
@@ -391,14 +407,19 @@ export default function TimeTrackerPage() {
         };
     }, [activeEntry, isTimerPaused]);
 
-    // User activity detection - detects mouse, keyboard, and touch interactions
+    // Enhanced user activity detection - comprehensive activity monitoring
     useEffect(() => {
         if (!activeEntry) return;
 
         let activityTimeout: NodeJS.Timeout;
+        let lastActivityTime = Date.now();
 
-        const handleActivity = () => {
+        const handleActivity = (event: Event) => {
             const now = Date.now();
+            
+            // Ignore duplicate events within 100ms to improve performance
+            if (now - lastActivityTime < 100) return;
+            lastActivityTime = now;
             
             // Clear any pending activity timeout
             if (activityTimeout) {
@@ -408,15 +429,18 @@ export default function TimeTrackerPage() {
             // Debounce activity updates to prevent too frequent calls
             activityTimeout = setTimeout(() => {
                 setLastActivity(now);
+                setIdleStartTime(null); // Reset idle start time on activity
                 
-                // Auto-resume timer if it was paused due to inactivity
-                if (isTimerPaused) {
+                // Update timer status and auto-resume if it was paused due to inactivity
+                if (isTimerPaused && timerStatus === 'idle') {
                     setIsTimerPaused(false);
+                    setTimerStatus('running');
+                    setShowIdleNotification(false);
                 }
-            }, 100); // 100ms debounce
+            }, 50); // Reduced debounce for better responsiveness
         };
 
-        // Listen for comprehensive user activity events
+        // Comprehensive user activity events
         const events = [
             // Mouse events
             'mousemove', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu',
@@ -429,25 +453,42 @@ export default function TimeTrackerPage() {
             // Form interactions
             'input', 'change', 'focus', 'blur',
             // Drag and drop
-            'dragstart', 'dragend', 'drop'
+            'dragstart', 'dragend', 'drop',
+            // Additional events for better detection
+            'pointerdown', 'pointerup', 'pointermove',
+            'select', 'selectstart', 'selectionchange',
+            'copy', 'paste', 'cut'
         ];
         
+        // Add event listeners with capture for better detection
         events.forEach(event => {
-            document.addEventListener(event, handleActivity, true);
+            document.addEventListener(event, handleActivity, { 
+                capture: true, 
+                passive: true 
+            });
         });
+
+        // Also monitor window-level events
+        const handleWindowActivity = () => handleActivity(new Event('window'));
+        window.addEventListener('resize', handleWindowActivity, { passive: true });
+        window.addEventListener('orientationchange', handleWindowActivity, { passive: true });
 
         return () => {
             // Clear activity timeout
             if (activityTimeout) {
                 clearTimeout(activityTimeout);
             }
+            
+            // Remove all event listeners
             events.forEach(event => {
                 document.removeEventListener(event, handleActivity, true);
             });
+            window.removeEventListener('resize', handleWindowActivity);
+            window.removeEventListener('orientationchange', handleWindowActivity);
         };
-    }, [activeEntry, isTimerPaused]);
+    }, [activeEntry, isTimerPaused, timerStatus]);
 
-    // Universal inactivity detection - works regardless of tab visibility
+    // Enhanced idle time detection with configurable threshold and smart notifications
     useEffect(() => {
         if (!activeEntry) return;
 
@@ -455,18 +496,29 @@ export default function TimeTrackerPage() {
             const now = Date.now();
             const inactiveTime = now - lastActivity;
             
-            // PAUSE timer if user has been inactive for 1 minute (60,000 ms)
-            if (inactiveTime >= 60000 && !isTimerPaused) {
+            // Check if user has been inactive for the threshold period
+            if (inactiveTime >= idleThreshold && !isTimerPaused) {
+                // Mark as idle and pause timer
                 setIsTimerPaused(true);
+                setTimerStatus('idle');
+                setIdleStartTime(now);
+                setPauseStartTime(now);
+                setShowIdleNotification(true);
             }
-        }, 1000);
+            
+            // Auto-hide idle notification after 10 seconds
+            if (showIdleNotification && inactiveTime >= idleThreshold + 10000) {
+                setShowIdleNotification(false);
+            }
+        }, 1000); // Check every second
 
         return () => clearInterval(inactivityCheck);
-    }, [activeEntry, lastActivity, isTimerPaused]);
+    }, [activeEntry, lastActivity, isTimerPaused, idleThreshold, showIdleNotification]);
 
-    // Timer effect - counts total elapsed time minus inactive periods
+    // Enhanced timer effect - counts total elapsed time minus inactive periods with status awareness
     useEffect(() => {
-        if (activeEntry && !isTimerPaused) {
+        if (activeEntry && !isTimerPaused && timerStatus === 'running') {
+            // Timer is running - update every second
             const interval = setInterval(() => {
                 const start = new Date(activeEntry.startTime).getTime();
                 const now = Date.now();
@@ -475,15 +527,15 @@ export default function TimeTrackerPage() {
                 setElapsed(Math.max(0, adjustedElapsed));
             }, 1000);
             return () => clearInterval(interval);
-        } else if (activeEntry && isTimerPaused) {
-            // When paused, show the elapsed time minus accumulated inactive time
+        } else if (activeEntry && (isTimerPaused || timerStatus !== 'running')) {
+            // Timer is paused or idle - show static time
             const start = new Date(activeEntry.startTime).getTime();
-            const pauseTime = pauseStartTime || Date.now();
-            const totalElapsed = Math.floor((pauseTime - start) / 1000);
+            const referenceTime = pauseStartTime || idleStartTime || Date.now();
+            const totalElapsed = Math.floor((referenceTime - start) / 1000);
             const adjustedElapsed = totalElapsed - accumulatedTime;
             setElapsed(Math.max(0, adjustedElapsed));
         }
-    }, [activeEntry, isTimerPaused, accumulatedTime, pauseStartTime]);
+    }, [activeEntry, isTimerPaused, timerStatus, accumulatedTime, pauseStartTime, idleStartTime]);
 
     // Stop timer when user closes browser window or navigates away
     useEffect(() => {
@@ -859,6 +911,13 @@ export default function TimeTrackerPage() {
                                 <PlusIcon className="h-5 w-5 mr-2" />
                                 Manual Entry
                             </button>
+                            <button
+                                onClick={() => setShowIdleSettings(!showIdleSettings)}
+                                className="inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
+                            >
+                                <FunnelIcon className="h-5 w-5 mr-2" />
+                                Idle Settings
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -907,6 +966,50 @@ export default function TimeTrackerPage() {
                     </nav>
                 </div>
             </div>
+
+            {/* Idle Settings Panel */}
+            {showIdleSettings && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-4">
+                                <h3 className="text-lg font-medium text-blue-900 dark:text-blue-100">
+                                    Idle Detection Settings
+                                </h3>
+                                <div className="flex items-center space-x-2">
+                                    <label htmlFor="idleThreshold" className="text-sm text-blue-700 dark:text-blue-300">
+                                        Pause timer after:
+                                    </label>
+                                    <select
+                                        id="idleThreshold"
+                                        value={idleThreshold / 1000}
+                                        onChange={(e) => setIdleThreshold(parseInt(e.target.value) * 1000)}
+                                        className="block w-24 px-3 py-1 text-sm border border-blue-300 dark:border-blue-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                    >
+                                        <option value="30">30 sec</option>
+                                        <option value="60">1 min</option>
+                                        <option value="120">2 min</option>
+                                        <option value="300">5 min</option>
+                                        <option value="600">10 min</option>
+                                    </select>
+                                    <span className="text-sm text-blue-600 dark:text-blue-400">
+                                        of inactivity
+                                    </span>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setShowIdleSettings(false)}
+                                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200"
+                            >
+                                <XMarkIcon className="h-5 w-5" />
+                            </button>
+                        </div>
+                        <p className="mt-2 text-sm text-blue-700 dark:text-blue-300">
+                            Timer will automatically pause when no user activity is detected for the specified duration and resume when activity resumes.
+                        </p>
+                    </div>
+                </div>
+            )}
 
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {viewMode === 'dashboard' && (
@@ -969,27 +1072,77 @@ export default function TimeTrackerPage() {
 
                                     {activeEntry ? (
                                         <div className="text-center">
-                                            <div className="inline-flex items-center justify-center w-32 h-32 rounded-full bg-gradient-to-r from-green-400 to-green-600 mb-6">
-                                                <ClockIcon className="h-16 w-16 text-white" />
+                                            {/* Timer status indicator with dynamic colors */}
+                                            <div className={`inline-flex items-center justify-center w-32 h-32 rounded-full mb-6 transition-all duration-300 ${
+                                                timerStatus === 'running' 
+                                                    ? 'bg-gradient-to-r from-green-400 to-green-600 animate-pulse' 
+                                                    : timerStatus === 'idle'
+                                                    ? 'bg-gradient-to-r from-orange-400 to-orange-600'
+                                                    : 'bg-gradient-to-r from-gray-400 to-gray-600'
+                                            }`}>
+                                                {timerStatus === 'running' ? (
+                                                    <ClockIcon className="h-16 w-16 text-white" />
+                                                ) : timerStatus === 'idle' ? (
+                                                    <PauseIcon className="h-16 w-16 text-white" />
+                                                ) : (
+                                                    <PauseIcon className="h-16 w-16 text-white" />
+                                                )}
                                             </div>
-                                            <div className="text-6xl font-bold text-gray-900 dark:text-white mb-4 font-mono">
+                                            
+                                            {/* Timer display with status-based styling */}
+                                            <div className={`text-6xl font-bold mb-4 font-mono transition-colors duration-300 ${
+                                                timerStatus === 'running' 
+                                                    ? 'text-gray-900 dark:text-white'
+                                                    : timerStatus === 'idle'
+                                                    ? 'text-orange-600 dark:text-orange-400'
+                                                    : 'text-gray-500 dark:text-gray-400'
+                                            }`}>
                                                 {formatTime(elapsed)}
                                             </div>
                                             
-                                            {/* Inactivity indicator */}
-                                            {isTimerPaused && (
-                                                <div className="mb-4 p-3 bg-yellow-100 dark:bg-yellow-900 border border-yellow-300 dark:border-yellow-700 rounded-lg">
-                                                    <div className="flex items-center justify-center space-x-2">
-                                                        <PauseIcon className="h-5 w-5 text-yellow-600 dark:text-yellow-400" />
-                                                        <span className="text-sm font-medium text-yellow-800 dark:text-yellow-200">
-                                                            Timer paused due to inactivity
-                                                        </span>
-                                                    </div>
-                                                    <p className="text-xs text-yellow-700 dark:text-yellow-300 mt-1 text-center">
-                                                        Move your mouse or press any key to resume
-                                                    </p>
+                                            {/* Status indicator */}
+                                            <div className={`mb-4 p-3 rounded-lg border transition-all duration-300 ${
+                                                timerStatus === 'running'
+                                                    ? 'bg-green-100 dark:bg-green-900 border-green-300 dark:border-green-700'
+                                                    : timerStatus === 'idle'
+                                                    ? 'bg-orange-100 dark:bg-orange-900 border-orange-300 dark:border-orange-700'
+                                                    : 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+                                            }`}>
+                                                <div className="flex items-center justify-center space-x-2">
+                                                    {timerStatus === 'running' ? (
+                                                        <>
+                                                            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                                                            <span className="text-sm font-medium text-green-800 dark:text-green-200">
+                                                                Timer Running
+                                                            </span>
+                                                        </>
+                                                    ) : timerStatus === 'idle' ? (
+                                                        <>
+                                                            <PauseIcon className="h-5 w-5 text-orange-600 dark:text-orange-400" />
+                                                            <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                                                                Idle Time Detected
+                                                            </span>
+                                                        </>
+                                                    ) : (
+                                                        <>
+                                                            <PauseIcon className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                                                            <span className="text-sm font-medium text-gray-800 dark:text-gray-200">
+                                                                Timer Paused
+                                                            </span>
+                                                        </>
+                                                    )}
                                                 </div>
-                                            )}
+                                                {timerStatus === 'idle' && (
+                                                    <p className="text-xs text-orange-700 dark:text-orange-300 mt-1 text-center">
+                                                        Move your mouse or press any key to resume tracking
+                                                    </p>
+                                                )}
+                                                {timerStatus === 'paused' && (
+                                                    <p className="text-xs text-gray-700 dark:text-gray-300 mt-1 text-center">
+                                                        Timer is manually paused
+                                                    </p>
+                                                )}
+                                            </div>
                                             
 
                                             <div className="mb-6">
@@ -1697,6 +1850,38 @@ export default function TimeTrackerPage() {
                                 <button
                                     onClick={() => setShowOnsiteCheckInToast(false)}
                                     className="inline-flex text-yellow-400 hover:text-yellow-600 focus:outline-none"
+                                >
+                                    <span className="sr-only">Dismiss</span>
+                                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* Idle Time Detection Toast Notification */}
+            {showIdleNotification && (
+                <div className="fixed bottom-4 right-4 z-50 animate-pulse">
+                    <div className="bg-orange-50 border-l-4 border-orange-400 p-4 rounded-lg shadow-lg max-w-sm">
+                        <div className="flex items-center">
+                            <div className="flex-shrink-0">
+                                <PauseIcon className="h-5 w-5 text-orange-400" />
+                            </div>
+                            <div className="ml-3">
+                                <p className="text-sm font-medium text-orange-800">
+                                    Timer Paused - Idle Time Detected
+                                </p>
+                                <p className="text-sm text-orange-700 mt-1">
+                                    No activity detected for 1 minute. Timer will resume when you return.
+                                </p>
+                            </div>
+                            <div className="ml-auto pl-3">
+                                <button
+                                    onClick={() => setShowIdleNotification(false)}
+                                    className="inline-flex text-orange-400 hover:text-orange-600 focus:outline-none"
                                 >
                                     <span className="sr-only">Dismiss</span>
                                     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">

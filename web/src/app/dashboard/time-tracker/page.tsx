@@ -351,11 +351,11 @@ export default function TimeTrackerPage() {
             // Timer just resumed - calculate and add the inactive period to accumulated time
             const now = Date.now();
             const inactiveDuration = Math.floor((now - pauseStartTime) / 1000);
-            
+
             if (inactiveDuration > 0) {
                 setAccumulatedTime(prev => prev + inactiveDuration);
             }
-            
+
             setPauseStartTime(null);
             setIdleStartTime(null);
             setTimerStatus('running');
@@ -363,157 +363,157 @@ export default function TimeTrackerPage() {
     }, [isTimerPaused, activeEntry, pauseStartTime, timerStatus]);
 
     // Page visibility detection - tracks when user returns to browser tab
-    useEffect(() => {
-        if (!activeEntry) return;
+    // useEffect(() => {
+    //     if (!activeEntry) return;
 
-        const handleVisibilityChange = () => {
-            const isVisible = !document.hidden;
-            setIsTabVisible(isVisible);
-            
-            // When user returns to the tab, treat it as activity and resume timer
-            if (isVisible) {
-                const now = Date.now();
-                setLastActivity(now);
-                if (isTimerPaused) {
-                    setIsTimerPaused(false);
-                }
-            }
-        };
+    //     const handleVisibilityChange = () => {
+    //         const isVisible = !document.hidden;
+    //         setIsTabVisible(isVisible);
 
-        // Listen for page visibility changes (tab switching, minimizing browser)
-        document.addEventListener('visibilitychange', handleVisibilityChange);
-        
-        // Also listen for window focus/blur events (switching between browser windows)
-        const handleFocus = () => {
-            const now = Date.now();
-            setIsTabVisible(true);
-            setLastActivity(now);
-            if (isTimerPaused) {
-                setIsTimerPaused(false);
-            }
-        };
-        
-        const handleBlur = () => {
-            setIsTabVisible(false);
-        };
+    //         // When user returns to the tab, treat it as activity and resume timer
+    //         if (isVisible) {
+    //             const now = Date.now();
+    //             setLastActivity(now);
+    //             if (isTimerPaused) {
+    //                 setIsTimerPaused(false);
+    //             }
+    //         }
+    //     };
 
-        window.addEventListener('focus', handleFocus);
-        window.addEventListener('blur', handleBlur);
+    //     // Listen for page visibility changes (tab switching, minimizing browser)
+    //     document.addEventListener('visibilitychange', handleVisibilityChange);
 
-        return () => {
-            document.removeEventListener('visibilitychange', handleVisibilityChange);
-            window.removeEventListener('focus', handleFocus);
-            window.removeEventListener('blur', handleBlur);
-        };
-    }, [activeEntry, isTimerPaused]);
+    //     // Also listen for window focus/blur events (switching between browser windows)
+    //     const handleFocus = () => {
+    //         const now = Date.now();
+    //         setIsTabVisible(true);
+    //         setLastActivity(now);
+    //         if (isTimerPaused) {
+    //             setIsTimerPaused(false);
+    //         }
+    //     };
+
+    //     const handleBlur = () => {
+    //         setIsTabVisible(false);
+    //     };
+
+    //     window.addEventListener('focus', handleFocus);
+    //     window.addEventListener('blur', handleBlur);
+
+    //     return () => {
+    //         document.removeEventListener('visibilitychange', handleVisibilityChange);
+    //         window.removeEventListener('focus', handleFocus);
+    //         window.removeEventListener('blur', handleBlur);
+    //     };
+    // }, [activeEntry, isTimerPaused]);
 
     // Enhanced user activity detection - comprehensive activity monitoring
-    useEffect(() => {
-        if (!activeEntry) return;
+    // useEffect(() => {
+    //     if (!activeEntry) return;
 
-        let activityTimeout: NodeJS.Timeout;
-        let lastActivityTime = Date.now();
+    //     let activityTimeout: NodeJS.Timeout;
+    //     let lastActivityTime = Date.now();
 
-        const handleActivity = (event: Event) => {
-            const now = Date.now();
-            
-            // Ignore duplicate events within 100ms to improve performance
-            if (now - lastActivityTime < 100) return;
-            lastActivityTime = now;
-            
-            // Clear any pending activity timeout
-            if (activityTimeout) {
-                clearTimeout(activityTimeout);
-            }
-            
-            // Debounce activity updates to prevent too frequent calls
-            activityTimeout = setTimeout(() => {
-                setLastActivity(now);
-                setIdleStartTime(null); // Reset idle start time on activity
-                
-                // Update timer status and auto-resume if it was paused due to inactivity
-                if (isTimerPaused && timerStatus === 'idle') {
-                    setIsTimerPaused(false);
-                    setTimerStatus('running');
-                    setShowIdleNotification(false);
-                }
-            }, 50); // Reduced debounce for better responsiveness
-        };
+    //     const handleActivity = (event: Event) => {
+    //         const now = Date.now();
 
-        // Comprehensive user activity events
-        const events = [
-            // Mouse events
-            'mousemove', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu',
-            // Keyboard events  
-            'keypress', 'keydown', 'keyup',
-            // Touch events for mobile devices
-            'touchstart', 'touchend', 'touchmove', 'touchcancel',
-            // Scroll and wheel events
-            'scroll', 'wheel',
-            // Form interactions
-            'input', 'change', 'focus', 'blur',
-            // Drag and drop
-            'dragstart', 'dragend', 'drop',
-            // Additional events for better detection
-            'pointerdown', 'pointerup', 'pointermove',
-            'select', 'selectstart', 'selectionchange',
-            'copy', 'paste', 'cut'
-        ];
-        
-        // Add event listeners with capture for better detection
-        events.forEach(event => {
-            document.addEventListener(event, handleActivity, { 
-                capture: true, 
-                passive: true 
-            });
-        });
+    //         // Ignore duplicate events within 100ms to improve performance
+    //         if (now - lastActivityTime < 100) return;
+    //         lastActivityTime = now;
 
-        // Also monitor window-level events
-        const handleWindowActivity = () => handleActivity(new Event('window'));
-        window.addEventListener('resize', handleWindowActivity, { passive: true });
-        window.addEventListener('orientationchange', handleWindowActivity, { passive: true });
+    //         // Clear any pending activity timeout
+    //         if (activityTimeout) {
+    //             clearTimeout(activityTimeout);
+    //         }
 
-        return () => {
-            // Clear activity timeout
-            if (activityTimeout) {
-                clearTimeout(activityTimeout);
-            }
-            
-            // Remove all event listeners
-            events.forEach(event => {
-                document.removeEventListener(event, handleActivity, true);
-            });
-            window.removeEventListener('resize', handleWindowActivity);
-            window.removeEventListener('orientationchange', handleWindowActivity);
-        };
-    }, [activeEntry, isTimerPaused, timerStatus]);
+    //         // Debounce activity updates to prevent too frequent calls
+    //         activityTimeout = setTimeout(() => {
+    //             setLastActivity(now);
+    //             setIdleStartTime(null); // Reset idle start time on activity
+
+    //             // Update timer status and auto-resume if it was paused due to inactivity
+    //             if (isTimerPaused && timerStatus === 'idle') {
+    //                 setIsTimerPaused(false);
+    //                 setTimerStatus('running');
+    //                 setShowIdleNotification(false);
+    //             }
+    //         }, 50); // Reduced debounce for better responsiveness
+    //     };
+
+    //     // Comprehensive user activity events
+    //     const events = [
+    //         // Mouse events
+    //         'mousemove', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu',
+    //         // Keyboard events  
+    //         'keypress', 'keydown', 'keyup',
+    //         // Touch events for mobile devices
+    //         'touchstart', 'touchend', 'touchmove', 'touchcancel',
+    //         // Scroll and wheel events
+    //         'scroll', 'wheel',
+    //         // Form interactions
+    //         'input', 'change', 'focus', 'blur',
+    //         // Drag and drop
+    //         'dragstart', 'dragend', 'drop',
+    //         // Additional events for better detection
+    //         'pointerdown', 'pointerup', 'pointermove',
+    //         'select', 'selectstart', 'selectionchange',
+    //         'copy', 'paste', 'cut'
+    //     ];
+
+    //     // Add event listeners with capture for better detection
+    //     events.forEach(event => {
+    //         document.addEventListener(event, handleActivity, { 
+    //             capture: true, 
+    //             passive: true 
+    //         });
+    //     });
+
+    //     // Also monitor window-level events
+    //     const handleWindowActivity = () => handleActivity(new Event('window'));
+    //     window.addEventListener('resize', handleWindowActivity, { passive: true });
+    //     window.addEventListener('orientationchange', handleWindowActivity, { passive: true });
+
+    //     return () => {
+    //         // Clear activity timeout
+    //         if (activityTimeout) {
+    //             clearTimeout(activityTimeout);
+    //         }
+
+    //         // Remove all event listeners
+    //         events.forEach(event => {
+    //             document.removeEventListener(event, handleActivity, true);
+    //         });
+    //         window.removeEventListener('resize', handleWindowActivity);
+    //         window.removeEventListener('orientationchange', handleWindowActivity);
+    //     };
+    // }, [activeEntry, isTimerPaused, timerStatus]);
 
     // Enhanced idle time detection with configurable threshold and smart notifications
-    useEffect(() => {
-        if (!activeEntry) return;
+    // useEffect(() => {
+    //     if (!activeEntry) return;
 
-        const inactivityCheck = setInterval(() => {
-            const now = Date.now();
-            const inactiveTime = now - lastActivity;
-            
-            // Check if user has been inactive for the threshold period
-            if (inactiveTime >= idleThreshold && !isTimerPaused) {
-                // Mark as idle and pause timer
-                setIsTimerPaused(true);
-                setTimerStatus('idle');
-                setIdleStartTime(now);
-                setPauseStartTime(now);
-                setShowIdleNotification(true);
-            }
-            
-            // Auto-hide idle notification after 10 seconds
-            if (showIdleNotification && inactiveTime >= idleThreshold + 10000) {
-                setShowIdleNotification(false);
-            }
-        }, 1000); // Check every second
+    //     const inactivityCheck = setInterval(() => {
+    //         const now = Date.now();
+    //         const inactiveTime = now - lastActivity;
 
-        return () => clearInterval(inactivityCheck);
-    }, [activeEntry, lastActivity, isTimerPaused, idleThreshold, showIdleNotification]);
+    //         // Check if user has been inactive for the threshold period
+    //         if (inactiveTime >= idleThreshold && !isTimerPaused) {
+    //             // Mark as idle and pause timer
+    //             setIsTimerPaused(true);
+    //             setTimerStatus('idle');
+    //             setIdleStartTime(now);
+    //             setPauseStartTime(now);
+    //             setShowIdleNotification(true);
+    //         }
+
+    //         // Auto-hide idle notification after 10 seconds
+    //         if (showIdleNotification && inactiveTime >= idleThreshold + 10000) {
+    //             setShowIdleNotification(false);
+    //         }
+    //     }, 1000); // Check every second
+
+    //     return () => clearInterval(inactivityCheck);
+    // }, [activeEntry, lastActivity, isTimerPaused, idleThreshold, showIdleNotification]);
 
     // Enhanced timer effect - counts total elapsed time minus inactive periods with status awareness
     useEffect(() => {
@@ -538,95 +538,95 @@ export default function TimeTrackerPage() {
     }, [activeEntry, isTimerPaused, timerStatus, accumulatedTime, pauseStartTime, idleStartTime]);
 
     // Stop timer when user closes browser window or navigates away
-    useEffect(() => {
-        if (!activeEntry) return;
+    // useEffect(() => {
+    //     if (!activeEntry) return;
 
-        const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-            // Use fetch with keepalive to stop timer reliably during page unload
-            const token = localStorage.getItem('accessToken');
-            if (token && activeEntry?.id && !isStopping) {
-                setIsStopping(true);
-                const data = JSON.stringify({
-                    query: `
-                        mutation StopTimeEntry {
-                            stopTimeEntry {
-                                id
-                                startTime
-                                endTime
-                                duration
-                                description
-                                taskId
-                                employeeId
-                                isManual
-                                createdAt
-                            }
-                        }
-                    `
-                });
+    //     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+    //         // Use fetch with keepalive to stop timer reliably during page unload
+    //         const token = localStorage.getItem('accessToken');
+    //         if (token && activeEntry?.id && !isStopping) {
+    //             setIsStopping(true);
+    //             const data = JSON.stringify({
+    //                 query: `
+    //                     mutation StopTimeEntry {
+    //                         stopTimeEntry {
+    //                             id
+    //                             startTime
+    //                             endTime
+    //                             duration
+    //                             description
+    //                             taskId
+    //                             employeeId
+    //                             isManual
+    //                             createdAt
+    //                         }
+    //                     }
+    //                 `
+    //             });
 
-                // Use fetch with keepalive for reliable delivery during page unload
-                const graphqlEndpoint = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/graphql';
-                fetch(graphqlEndpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: data,
-                    keepalive: true // Ensures request completes even when page is unloading
-                }).catch(() => {
-                    // Silently ignore errors during unload
-                });
-            }
-            // No browser alert - just silently stop timer in background
-        };
+    //             // Use fetch with keepalive for reliable delivery during page unload
+    //             const graphqlEndpoint = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/graphql';
+    //             fetch(graphqlEndpoint, {
+    //                 method: 'POST',
+    //                 headers: {
+    //                     'Content-Type': 'application/json',
+    //                     'Authorization': `Bearer ${token}`
+    //                 },
+    //                 body: data,
+    //                 keepalive: true // Ensures request completes even when page is unloading
+    //             }).catch(() => {
+    //                 // Silently ignore errors during unload
+    //             });
+    //         }
+    //         // No browser alert - just silently stop timer in background
+    //     };
 
-        // Handle pagehide event as additional fallback for browser close
-        const handlePageHide = (e: PageTransitionEvent) => {
-            const token = localStorage.getItem('accessToken');
-            if (token && activeEntry?.id && !isStopping) {
-                setIsStopping(true);
-                const data = JSON.stringify({
-                    query: `
-                        mutation StopTimeEntry {
-                            stopTimeEntry {
-                                id
-                                startTime
-                                endTime
-                                duration
-                                description
-                                taskId
-                                employeeId
-                                isManual
-                                createdAt
-                            }
-                        }
-                    `
-                });
+    //     // Handle pagehide event as additional fallback for browser close
+    //     const handlePageHide = (e: PageTransitionEvent) => {
+    //         const token = localStorage.getItem('accessToken');
+    //         if (token && activeEntry?.id && !isStopping) {
+    //             setIsStopping(true);
+    //             const data = JSON.stringify({
+    //                 query: `
+    //                     mutation StopTimeEntry {
+    //                         stopTimeEntry {
+    //                             id
+    //                             startTime
+    //                             endTime
+    //                             duration
+    //                             description
+    //                             taskId
+    //                             employeeId
+    //                             isManual
+    //                             createdAt
+    //                         }
+    //                     }
+    //                 `
+    //             });
 
-                const graphqlEndpoint = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/graphql';
-                fetch(graphqlEndpoint, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: data,
-                    keepalive: true
-                }).catch(() => {
-                    // Silently ignore errors during page hide
-                });
-            }
-        };
+    //             const graphqlEndpoint = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000/graphql';
+    //             fetch(graphqlEndpoint, {
+    //                 method: 'POST',
+    //                 headers: {
+    //                     'Content-Type': 'application/json',
+    //                     'Authorization': `Bearer ${token}`
+    //                 },
+    //                 body: data,
+    //                 keepalive: true
+    //             }).catch(() => {
+    //                 // Silently ignore errors during page hide
+    //             });
+    //         }
+    //     };
 
-        window.addEventListener('beforeunload', handleBeforeUnload);
-        window.addEventListener('pagehide', handlePageHide);
+    //     window.addEventListener('beforeunload', handleBeforeUnload);
+    //     window.addEventListener('pagehide', handlePageHide);
 
-        return () => {
-            window.removeEventListener('beforeunload', handleBeforeUnload);
-            window.removeEventListener('pagehide', handlePageHide);
-        };
-    }, [activeEntry, stopTimer]);
+    //     return () => {
+    //         window.removeEventListener('beforeunload', handleBeforeUnload);
+    //         window.removeEventListener('pagehide', handlePageHide);
+    //     };
+    // }, [activeEntry, stopTimer]);
 
     // Utility functions
     const formatTime = (seconds: number) => {
@@ -880,6 +880,22 @@ export default function TimeTrackerPage() {
         checkIn();
     };
 
+    useEffect(() => {
+        if (!activeEntry) {
+            setElapsed(0);
+            return;
+        }
+
+        const interval = setInterval(() => {
+            const start = new Date(activeEntry.startTime).getTime();
+            const now = Date.now();
+            setElapsed(Math.floor((now - start) / 1000));
+        }, 1000);
+
+        return () => clearInterval(interval);
+    }, [activeEntry]);
+
+
     return (
         <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
             {/* Header */}
@@ -930,8 +946,8 @@ export default function TimeTrackerPage() {
                         <button
                             onClick={() => setViewMode('dashboard')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${viewMode === 'dashboard'
-                                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
                                 }`}
                         >
                             <div className="flex items-center">
@@ -942,8 +958,8 @@ export default function TimeTrackerPage() {
                         <button
                             onClick={() => setViewMode('timesheet')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${viewMode === 'timesheet'
-                                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
                                 }`}
                         >
                             <div className="flex items-center">
@@ -954,8 +970,8 @@ export default function TimeTrackerPage() {
                         <button
                             onClick={() => setViewMode('reports')}
                             className={`py-4 px-1 border-b-2 font-medium text-sm ${viewMode === 'reports'
-                                    ? 'border-blue-500 text-blue-600 dark:text-blue-400'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
+                                ? 'border-blue-500 text-blue-600 dark:text-blue-400'
+                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 dark:text-gray-400 dark:hover:text-gray-300'
                                 }`}
                         >
                             <div className="flex items-center">
@@ -1073,13 +1089,12 @@ export default function TimeTrackerPage() {
                                     {activeEntry ? (
                                         <div className="text-center">
                                             {/* Timer status indicator with dynamic colors */}
-                                            <div className={`inline-flex items-center justify-center w-32 h-32 rounded-full mb-6 transition-all duration-300 ${
-                                                timerStatus === 'running' 
-                                                    ? 'bg-gradient-to-r from-green-400 to-green-600 animate-pulse' 
+                                            <div className={`inline-flex items-center justify-center w-32 h-32 rounded-full mb-6 transition-all duration-300 ${timerStatus === 'running'
+                                                    ? 'bg-gradient-to-r from-green-400 to-green-600 animate-pulse'
                                                     : timerStatus === 'idle'
-                                                    ? 'bg-gradient-to-r from-orange-400 to-orange-600'
-                                                    : 'bg-gradient-to-r from-gray-400 to-gray-600'
-                                            }`}>
+                                                        ? 'bg-gradient-to-r from-orange-400 to-orange-600'
+                                                        : 'bg-gradient-to-r from-gray-400 to-gray-600'
+                                                }`}>
                                                 {timerStatus === 'running' ? (
                                                     <ClockIcon className="h-16 w-16 text-white" />
                                                 ) : timerStatus === 'idle' ? (
@@ -1088,26 +1103,24 @@ export default function TimeTrackerPage() {
                                                     <PauseIcon className="h-16 w-16 text-white" />
                                                 )}
                                             </div>
-                                            
+
                                             {/* Timer display with status-based styling */}
-                                            <div className={`text-6xl font-bold mb-4 font-mono transition-colors duration-300 ${
-                                                timerStatus === 'running' 
+                                            <div className={`text-6xl font-bold mb-4 font-mono transition-colors duration-300 ${timerStatus === 'running'
                                                     ? 'text-gray-900 dark:text-white'
                                                     : timerStatus === 'idle'
-                                                    ? 'text-orange-600 dark:text-orange-400'
-                                                    : 'text-gray-500 dark:text-gray-400'
-                                            }`}>
+                                                        ? 'text-orange-600 dark:text-orange-400'
+                                                        : 'text-gray-500 dark:text-gray-400'
+                                                }`}>
                                                 {formatTime(elapsed)}
                                             </div>
-                                            
+
                                             {/* Status indicator */}
-                                            <div className={`mb-4 p-3 rounded-lg border transition-all duration-300 ${
-                                                timerStatus === 'running'
+                                            <div className={`mb-4 p-3 rounded-lg border transition-all duration-300 ${timerStatus === 'running'
                                                     ? 'bg-green-100 dark:bg-green-900 border-green-300 dark:border-green-700'
                                                     : timerStatus === 'idle'
-                                                    ? 'bg-orange-100 dark:bg-orange-900 border-orange-300 dark:border-orange-700'
-                                                    : 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
-                                            }`}>
+                                                        ? 'bg-orange-100 dark:bg-orange-900 border-orange-300 dark:border-orange-700'
+                                                        : 'bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600'
+                                                }`}>
                                                 <div className="flex items-center justify-center space-x-2">
                                                     {timerStatus === 'running' ? (
                                                         <>
@@ -1143,7 +1156,7 @@ export default function TimeTrackerPage() {
                                                     </p>
                                                 )}
                                             </div>
-                                            
+
 
                                             <div className="mb-6">
                                                 <p className="text-lg text-gray-600 dark:text-gray-400 mb-2">
@@ -1252,8 +1265,8 @@ export default function TimeTrackerPage() {
                                                 onClick={handleStartTimer}
                                                 disabled={!hasAssignedTasks && !taskDescription.trim()}
                                                 className={`w-full inline-flex items-center justify-center px-6 py-3 rounded-lg transition-colors ${(!hasAssignedTasks && !taskDescription.trim())
-                                                        ? 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
-                                                        : 'bg-green-600 hover:bg-green-700 text-white'
+                                                    ? 'bg-gray-300 dark:bg-gray-600 text-gray-500 dark:text-gray-400 cursor-not-allowed'
+                                                    : 'bg-green-600 hover:bg-green-700 text-white'
                                                     }`}
                                             >
                                                 <PlayIcon className="h-5 w-5 mr-2" />
@@ -1273,10 +1286,10 @@ export default function TimeTrackerPage() {
 
                                     <div className="space-y-6">
                                         <div className={`p-4 rounded-lg ${attendanceStatus.color === 'green'
-                                                ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
-                                                : attendanceStatus.color === 'blue'
-                                                    ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
-                                                    : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'
+                                            ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
+                                            : attendanceStatus.color === 'blue'
+                                                ? 'bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800'
+                                                : 'bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800'
                                             }`}>
                                             <div className="flex items-center justify-between">
                                                 <div className="flex items-center">
@@ -1299,9 +1312,9 @@ export default function TimeTrackerPage() {
                                                     (employeeWorkType === WorkType.REMOTE && todaySessions.some((s: any) => s.checkIn && !s.checkOut))
                                                 }
                                                 className={`inline-flex items-center justify-center px-4 py-3 rounded-lg font-medium transition-colors ${(employeeWorkType === WorkType.ONSITE && todaySessions.some((s: any) => s.checkIn && !s.checkOut)) ||
-                                                        (employeeWorkType === WorkType.REMOTE && todaySessions.some((s: any) => s.checkIn && !s.checkOut))
-                                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                                        : 'bg-blue-600 hover:bg-blue-700 text-white'
+                                                    (employeeWorkType === WorkType.REMOTE && todaySessions.some((s: any) => s.checkIn && !s.checkOut))
+                                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                                    : 'bg-blue-600 hover:bg-blue-700 text-white'
                                                     }`}
                                             >
                                                 <PlayIcon className="h-5 w-5 mr-2" />
@@ -1314,8 +1327,8 @@ export default function TimeTrackerPage() {
                                                 onClick={() => checkOut()}
                                                 disabled={!todaySessions.some((s: any) => s.checkIn && !s.checkOut)}
                                                 className={`inline-flex items-center justify-center px-4 py-3 rounded-lg font-medium transition-colors ${!todaySessions.some((s: any) => s.checkIn && !s.checkOut)
-                                                        ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                                                        : 'bg-gray-600 hover:bg-gray-700 text-white'
+                                                    ? 'bg-gray-100 text-gray-400 cursor-not-allowed'
+                                                    : 'bg-gray-600 hover:bg-gray-700 text-white'
                                                     }`}
                                             >
                                                 <StopIcon className="h-5 w-5 mr-2" />
@@ -1333,8 +1346,8 @@ export default function TimeTrackerPage() {
                                                                 <div className="flex items-center space-x-3">
                                                                     <div className="flex-shrink-0">
                                                                         <div className={`w-2 h-2 rounded-full ${session.checkIn && !session.checkOut
-                                                                                ? 'bg-green-500'
-                                                                                : 'bg-gray-400'
+                                                                            ? 'bg-green-500'
+                                                                            : 'bg-gray-400'
                                                                             }`} />
                                                                     </div>
                                                                     <div>
@@ -1511,8 +1524,8 @@ export default function TimeTrackerPage() {
                                                 </td>
                                                 <td className="px-6 py-4 whitespace-nowrap">
                                                     <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full ${entry.endTime
-                                                            ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
-                                                            : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
+                                                        ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                                                        : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400'
                                                         }`}>
                                                         {entry.endTime ? 'Completed' : 'Active'}
                                                     </span>
@@ -1747,8 +1760,8 @@ export default function TimeTrackerPage() {
                                 <button
                                     onClick={() => handleWorkTypeChange(WorkType.REMOTE)}
                                     className={`w-full p-4 rounded-lg border-2 transition-all ${employeeWorkType === WorkType.REMOTE
-                                            ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
-                                            : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
+                                        ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
+                                        : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
                                         }`}
                                 >
                                     <div className="flex items-center space-x-3">
@@ -1765,8 +1778,8 @@ export default function TimeTrackerPage() {
                                 <button
                                     onClick={() => handleWorkTypeChange(WorkType.ONSITE)}
                                     className={`w-full p-4 rounded-lg border-2 transition-all ${employeeWorkType === WorkType.ONSITE
-                                            ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
-                                            : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
+                                        ? 'border-purple-500 bg-purple-50 dark:bg-purple-900/20'
+                                        : 'border-gray-200 dark:border-gray-600 hover:border-purple-300'
                                         }`}
                                 >
                                     <div className="flex items-center space-x-3">

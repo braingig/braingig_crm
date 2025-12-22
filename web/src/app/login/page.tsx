@@ -17,6 +17,9 @@ export default function LoginPage() {
         onCompleted: (data) => {
             const { accessToken, refreshToken, user } = data.login;
             setAuth(user, accessToken, refreshToken);
+            if (typeof window !== 'undefined' && (window as any).electron) {
+                (window as any).electron.saveToken(accessToken);
+            }
             router.push('/dashboard');
         },
         onError: (error) => {

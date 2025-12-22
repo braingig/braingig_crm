@@ -93,4 +93,21 @@ export class TimesheetsResolver {
     async employeeWorkType(@CurrentUser() user: any) {
         return this.timesheetsService.getEmployeeWorkType(user.userId);
     }
+
+    @Mutation(() => Boolean)
+    @UseGuards(GqlAuthGuard)
+    async reportActivity(
+        @CurrentUser() user: any,
+        @Args('type', { type: () => String }) type: string,
+        @Args('metadata', { type: () => String, nullable: true }) metadata?: string,
+    ) {
+        await this.timesheetsService.reportActivity(
+            user.userId,
+            type,
+            metadata ? JSON.parse(metadata) : null,
+        );
+        return true;
+    }
+
+
 }

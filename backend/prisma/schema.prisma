@@ -107,6 +107,8 @@ model User {
   notifications   Notification[]
   comments        Comment[]
 
+activityEvents  ActivityEvent[]
+
   @@index([email])
   @@index([role])
   @@index([status])
@@ -300,4 +302,16 @@ model Comment {
 
   @@index([taskId])
   @@index([userId])
+}
+
+model ActivityEvent {
+  id         String   @id @default(uuid())
+  employeeId String
+  type       String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  employee User @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([employeeId, createdAt])
 }

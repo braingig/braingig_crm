@@ -11,9 +11,9 @@ export class TimesheetsService {
         today.setHours(0, 0, 0, 0);
 
         // Get employee to check work type
-        const employee = await (this.prisma as any).user.findUnique({ 
-            where: { id: employeeId }, 
-            select: { workType: true } 
+        const employee = await (this.prisma as any).user.findUnique({
+            where: { id: employeeId },
+            select: { workType: true }
         });
 
         if (!employee) {
@@ -348,15 +348,15 @@ export class TimesheetsService {
 
     async updateEmployeeWorkType(employeeId: string, workType: WorkType) {
         return (this.prisma as any).user.update({
-        where: { id: employeeId },
-        data: { workType },
-        select: {
-            id: true,
-            name: true,
-            email: true,
-            workType: true
-        }
-    });
+            where: { id: employeeId },
+            data: { workType },
+            select: {
+                id: true,
+                name: true,
+                email: true,
+                workType: true
+            }
+        });
     }
 
     async getEmployeeWorkType(employeeId: string) {
@@ -366,4 +366,24 @@ export class TimesheetsService {
         });
         return employee?.workType;
     }
+
+    async reportActivity(employeeId: string, type: string, metadata?: any) {
+        await this.prisma.activityEvent.create({
+            data: { employeeId, type, metadata },
+        });
+
+        const activeEntry = await this.prisma.timeEntry.findFirst({
+            where: { employeeId, endTime: null },
+        });
+
+        if (!activeEntry) return;
+
+        if (type === 'IDLE' || type === 'LOCK') {
+            await this.stopTimeEntry(employeeId);
+        }
+
+        if (type === 'ACTIVE') {
+        }
+    }
+
 }

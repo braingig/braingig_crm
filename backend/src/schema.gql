@@ -89,6 +89,7 @@ type Mutation {
   logout: Boolean!
   refreshToken(input: RefreshTokenInput!): RefreshTokenResponse!
   register(input: RegisterInput!): AuthResponse!
+  reportActivity(metadata: String, type: String!): Boolean!
   startTimeEntry(input: StartTimeEntryInput!): TimeEntryType!
   stopTimeEntry: TimeEntryType!
   updateEmployeeWorkType(workType: String!): EmployeeType!

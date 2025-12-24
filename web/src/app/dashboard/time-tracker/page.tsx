@@ -4,6 +4,7 @@ import { useQuery, useMutation, useApolloClient } from '@apollo/client';
 import { GET_ACTIVE_TIME_ENTRY, GET_TODAY_TIMESHEET, GET_TODAY_SESSIONS, GET_TIME_ENTRIES, GET_TIMESHEETS, CHECK_IN, CHECK_OUT, START_TIME_ENTRY, STOP_TIME_ENTRY, GET_PROJECTS, GET_TASKS, GET_ME, GET_EMPLOYEE_WORK_TYPE, UPDATE_EMPLOYEE_WORK_TYPE, REPORT_ACTIVITY } from '@/lib/graphql/queries';
 import { WorkType } from '@/types';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { unstable_batchedUpdates } from 'react-dom';
 import { electronService } from '@/services/electronService';
 import { browserElectronService } from '@/services/browserElectronService';
 import {
@@ -58,6 +59,8 @@ export default function TimeTrackerPage() {
     const persistentCacheRef = useRef<any>(null);
     const cacheInitializedRef = useRef(false);
     const isTimerPausedRef = useRef(false); // Keep current isTimerPaused value for activity listener
+    const timerIntervalRef = useRef<NodeJS.Timeout | null>(null); // Store current timer interval
+    const isUpdatingStateRef = useRef(false); // Prevent rapid state updates
     const [isTabVisible, setIsTabVisible] = useState(true);
     const [isStopping, setIsStopping] = useState(false);
     const [timerStatus, setTimerStatus] = useState<'running' | 'paused' | 'idle'>('running');
@@ -83,10 +86,7 @@ export default function TimeTrackerPage() {
     // Get current user ID for filtering
     const currentUserId = meData?.me?.id;
 
-    // Keep isTimerPausedRef in sync with state
-    useEffect(() => {
-        isTimerPausedRef.current = isTimerPaused;
-    }, [isTimerPaused]);
+    // isTimerPausedRef is now updated directly in the state setters for immediate consistency
 
     // Get employee work type
     const { data: workTypeData, refetch: refetchWorkType } = useQuery(GET_EMPLOYEE_WORK_TYPE, {
@@ -412,17 +412,25 @@ export default function TimeTrackerPage() {
 
     const initializeElectronTracking = async () => {
         console.log('🔧 Initializing Electron tracking...');
-        console.log('📋 Current User ID:', currentUserId);
+        console.log('📋 Current User ID:', currentUserId, 'type:', typeof currentUserId);
 
         if (!currentUserId) {
             console.error('❌ Cannot start Electron tracking: No user ID');
+            console.error('❌ User ID is falsy - returning early');
             return;
         }
 
         // Try browser electron service first (for regular browser usage)
         console.log('🌐 Checking browser electron service availability...');
-        if (browserElectronService.isServiceAvailable) {
-            console.log('✅ Browser electron service available');
+        console.log('🔍 isServiceAvailable (initial):', browserElectronService.isServiceAvailable);
+        
+        // Force immediate availability check
+        const isAvailable = await browserElectronService.forceCheckAvailability();
+        console.log('🔍 isServiceAvailable (after force check):', isAvailable);
+        
+        console.log('🔍 About to check isAvailable condition:', isAvailable, 'type:', typeof isAvailable);
+        if (isAvailable) {
+            console.log('✅ Browser electron service available - ENTERING IF BLOCK');
             
             try {
                 const token = localStorage.getItem('accessToken');
@@ -435,8 +443,12 @@ export default function TimeTrackerPage() {
 
                 // Start activity tracking via HTTP
                 console.log('🚀 Starting activity tracking for user:', currentUserId);
+                console.log('🔗 Making request to:', `http://localhost:8765/start-tracking`);
+                console.log('📤 Request body:', { userId: currentUserId, token: token ? 'present' : 'missing' });
                 const trackingStarted = await browserElectronService.startActivityTracking(currentUserId, token);
               console.log('📊 Tracking started result:', trackingStarted);
+              console.log('📊 trackingStarted.success:', trackingStarted?.success);
+              console.log('📊 trackingStarted.tracking:', trackingStarted?.tracking);
               setElectronTrackingEnabled(trackingStarted.success && trackingStarted.tracking);
   
               if (trackingStarted.success && trackingStarted.tracking) {
@@ -444,14 +456,17 @@ export default function TimeTrackerPage() {
 
                     // Listen for activity status updates via SSE
                     const unsubscribe = browserElectronService.onActivityStatus(async (data) => {
-                        console.log('📨 Activity status from Electron:', data);
-                        setActivityStatus(data);
+                        try {
+                            console.log('📨 Activity status from Electron:', data);
+                            setActivityStatus(data);
 
                         // Use persistent cache reference to avoid React re-mount issues
-                        const currentActiveEntry = persistentCacheRef.current || cachedActiveEntry;
+                        // Fallback to GraphQL activeEntry if cache is empty
+                        const currentActiveEntry = persistentCacheRef.current || cachedActiveEntry || activeEntry;
                         console.log('💰 Using persistent cache for activity handling');
                         console.log('💰 persistentCacheRef:', persistentCacheRef.current);
                         console.log('💰 cachedActiveEntry state:', cachedActiveEntry);
+                        console.log('💰 GraphQL activeEntry:', !!activeEntry);
                         console.log('💰 Final currentActiveEntry:', currentActiveEntry);
 
                         // Handle activity changes with persistent cached activeEntry
@@ -477,17 +492,21 @@ export default function TimeTrackerPage() {
                             }
                         }
 
-                        // Report activity to backend
-                        reportActivity({
-                            variables: {
-                                type: data.type,
-                                metadata: {
-                                    idleTime: data.idleTime,
-                                    timestamp: data.timestamp,
-                                    source: 'electron-desktop'
+                            // Report activity to backend
+                            reportActivity({
+                                variables: {
+                                    type: data.type,
+                                    metadata: {
+                                        idleTime: data.idleTime,
+                                        timestamp: data.timestamp,
+                                        source: 'electron-desktop'
+                                    }
                                 }
-                            }
-                        });
+                            });
+                        } catch (error) {
+                            console.error('❌ ERROR in activity callback:', error instanceof Error ? error.message : String(error));
+                            console.error('❌ Error stack:', error instanceof Error ? error.stack : 'No stack available');
+                        }
                     });
 
                     return unsubscribe;
@@ -497,6 +516,7 @@ export default function TimeTrackerPage() {
             }
         } else {
             console.log('⚠️ Browser electron service not available, falling back to IPC service...');
+            console.log('⚠️ isAvailable value:', isAvailable, 'type:', typeof isAvailable);
             
             // Fallback to original IPC service if running inside Electron
             if (electronService.isRunningInElectron) {
@@ -525,12 +545,17 @@ export default function TimeTrackerPage() {
                             console.log('📨 Activity status from Electron:', data);
                             setActivityStatus(data);
 
-                            // Handle activity changes
-                            if (data.type === 'IDLE' && activeEntry) {
+                            // Handle activity changes with persistent cache to ensure consistency
+                            const currentActiveEntry = persistentCacheRef.current || cachedActiveEntry || activeEntry;
+                            console.log('🔍 IPC Activity check - data.type:', data.type, 'currentActiveEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPaused);
+                            
+                            if (data.type === 'IDLE' && currentActiveEntry) {
                                 // User went idle - stop the timer
+                                console.log('🔴 IPC IDLE detected, pausing timer');
                                 handleTimerPause();
-                            } else if (data.type === 'ACTIVE' && activeEntry && isTimerPaused) {
+                            } else if (data.type === 'ACTIVE' && currentActiveEntry && isTimerPaused) {
                                 // User became active again - resume the timer
+                                console.log('🟢 IPC ACTIVE detected, resuming timer');
                                 handleTimerResume();
                             }
 
@@ -632,31 +657,7 @@ export default function TimeTrackerPage() {
         }
     }, [activeEntry?.id]); // Only re-run when active entry ID changes
 
-    // Enhanced timer pause/resume logic with accurate time calculation
-    useEffect(() => {
-        if (!activeEntry) return;
-
-        if (isTimerPaused && !pauseStartTime) {
-            // Timer just paused - record the pause start time
-            const now = Date.now();
-            setPauseStartTime(now);
-            if (timerStatus === 'idle') {
-                setIdleStartTime(now);
-            }
-        } else if (!isTimerPaused && pauseStartTime) {
-            // Timer just resumed - calculate and add the inactive period to accumulated time
-            const now = Date.now();
-            const inactiveDuration = Math.floor((now - pauseStartTime) / 1000);
-
-            if (inactiveDuration > 0) {
-                setAccumulatedTime(prev => prev + inactiveDuration);
-            }
-
-            setPauseStartTime(null);
-            setIdleStartTime(null);
-            setTimerStatus('running');
-        }
-    }, [isTimerPaused, activeEntry, pauseStartTime, timerStatus]);
+    // Timer pause/resume logic is now handled directly in handleTimerPause and handleTimerResume functions
 
     // Page visibility detection - tracks when user returns to browser tab
     // useEffect(() => {
@@ -811,6 +812,8 @@ export default function TimeTrackerPage() {
     //     return () => clearInterval(inactivityCheck);
     // }, [activeEntry, lastActivity, isTimerPaused, idleThreshold, showIdleNotification]);
 
+    // Fallback idle detection removed - Electron service handles all idle detection
+
     // Enhanced timer effect - counts total elapsed time minus inactive periods with status awareness
     useEffect(() => {
         // Use persistent cache reference to avoid React re-mount issues
@@ -826,25 +829,37 @@ export default function TimeTrackerPage() {
             cachedState: !!cachedActiveEntry
         });
         
+        // Clear any existing interval first
+        if (timerIntervalRef.current) {
+            console.log('⏱️ Clearing existing timer interval');
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+        }
+
         if (timerEntry && !isTimerPausedRef.current && timerStatus === 'running') {
             // Timer is running - update every second
-            const interval = setInterval(() => {
+            console.log('⏱️ TIMER RUNNING - Starting interval to update elapsed time');
+            timerIntervalRef.current = setInterval(() => {
                 const start = new Date(timerEntry.startTime).getTime();
                 const now = Date.now();
                 const totalElapsed = Math.floor((now - start) / 1000);
                 const adjustedElapsed = totalElapsed - accumulatedTime;
+                
                 setElapsed(Math.max(0, adjustedElapsed));
             }, 1000);
-            return () => clearInterval(interval);
+            return () => {
+                if (timerIntervalRef.current) {
+                    clearInterval(timerIntervalRef.current);
+                    timerIntervalRef.current = null;
+                }
+            };
         } else if (timerEntry && (isTimerPausedRef.current || timerStatus === 'idle')) {
-            // Timer is paused or idle - show static time, DO NOT change state
-            const start = new Date(timerEntry.startTime).getTime();
-            const referenceTime = pauseStartTime || idleStartTime || Date.now();
-            const totalElapsed = Math.floor((referenceTime - start) / 1000);
-            const adjustedElapsed = totalElapsed - accumulatedTime;
-            setElapsed(Math.max(0, adjustedElapsed));
+            // Timer is paused or idle - FREEZE the display time, DO NOT update
+            console.log('⏱️ TIMER PAUSED/IDLE - isTimerPausedRef:', isTimerPausedRef.current, 'timerStatus:', timerStatus);
+            console.log('⏱️ FREEZING elapsed time at current value:', elapsed);
+            // Do NOT update elapsed time - keep it frozen at the pause moment
         }
-    }, [activeEntry, accumulatedTime, idleStartTime]);
+    }, [activeEntry, accumulatedTime, idleStartTime, isTimerPaused, timerStatus, pauseStartTime]);
 
     // Stop timer when user closes browser window or navigates away
     // useEffect(() => {
@@ -1175,10 +1190,22 @@ export default function TimeTrackerPage() {
     const handleTimerPause = () => {
         // Use persistent cache reference to avoid React re-mount issues
         const currentEntry = persistentCacheRef.current || cachedActiveEntry;
+        console.log('🔴 handleTimerPause called - currentEntry:', !!currentEntry, 'cachedActiveEntry:', !!cachedActiveEntry, 'persistentCacheRef:', !!persistentCacheRef.current);
+        
         if (!currentEntry) {
             console.log('🔴 Cannot pause - no cached active entry');
             return;
         }
+        
+        // Prevent rapid state updates
+        if (isUpdatingStateRef.current || isTimerPausedRef.current) {
+            console.log('🔴 Ignoring pause - already updating or already paused');
+            return;
+        }
+        
+        console.log('🔴 Electron idle detection - proceeding with pause');
+        
+        isUpdatingStateRef.current = true;
         
         console.log('🔴 Pausing timer due to inactivity. cachedEntry:', currentEntry);
         console.log('🔴 Timer entry details:', {
@@ -1188,12 +1215,36 @@ export default function TimeTrackerPage() {
             duration: currentEntry.duration
         });
         console.log('🔴 About to set isTimerPaused to true (current value:', isTimerPaused, ')');
-        setIsTimerPaused(true);
-        setTimerStatus('idle');
-        setPauseStartTime(Date.now());
-        setShowIdleNotification(true);
+        
+        // Force clear any running timer interval immediately
+        if (timerIntervalRef.current) {
+            console.log('🔴 Force clearing timer interval during pause');
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+        }
+        
+        // Update ref immediately for consistency
+        isTimerPausedRef.current = true;
+        
+        // Adjust elapsed time to add 60 seconds of active time
+        // The user was active for 60 seconds before going idle
+        const adjustedElapsed = elapsed + 60;
+        console.log('🔴 Adjusting elapsed time from', elapsed, 'to', adjustedElapsed, '(adding 60s active time)');
+        
+        // Use unstable_batchedUpdates to ensure all state changes happen together
+        unstable_batchedUpdates(() => {
+            setElapsed(adjustedElapsed);
+            setIsTimerPaused(true);
+            setTimerStatus('idle');
+            setPauseStartTime(Date.now());
+            setShowIdleNotification(true);
+            console.log('🔴 BATCHED STATE UPDATE COMPLETED');
+        });
         
         console.log('🔴 PAUSE STATE SET - isTimerPaused should now be true');
+        
+        // Reset the updating flag immediately
+        isUpdatingStateRef.current = false;
     };
 
     const handleTimerResume = () => {
@@ -1204,18 +1255,48 @@ export default function TimeTrackerPage() {
             return;
         }
         
+        // Prevent rapid state updates
+        if (isUpdatingStateRef.current || !isTimerPausedRef.current) {
+            console.log('🟢 Ignoring resume - already updating or not paused');
+            return;
+        }
+        
+        console.log('🟢 Electron active detection - proceeding with resume');
+        
+        isUpdatingStateRef.current = true;
+        
         console.log('🟢 Resuming timer after activity');
-        setIsTimerPaused(false);
-        setShowIdleNotification(false);
+        
+        // Update ref immediately for consistency
+        isTimerPausedRef.current = false;
+        
+        // Use unstable_batchedUpdates to ensure all state changes happen together
+        unstable_batchedUpdates(() => {
+            setIsTimerPaused(false);
+            setTimerStatus('running'); // Reset timer status to running
+            setShowIdleNotification(false);
+            // Don't manually set elapsed time - let the timer effect handle it naturally
+            console.log('🟢 BATCHED RESUME UPDATE COMPLETED');
+        });
         
         // Calculate and add the inactive period
         if (pauseStartTime) {
             const inactiveDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
             if (inactiveDuration > 0) {
-                setAccumulatedTime(prev => prev + inactiveDuration);
+                setAccumulatedTime(prev => {
+                    const newTotal = prev + inactiveDuration;
+                    console.log('🟢 Added inactive duration to accumulated time:', inactiveDuration, 'prev:', prev, 'newTotal:', newTotal);
+                    return newTotal;
+                });
             }
         }
         setPauseStartTime(null);
+        setIdleStartTime(null); // Also clear idle start time
+        
+        // Small delay to ensure all state updates are processed before timer restarts
+        setTimeout(() => {
+            isUpdatingStateRef.current = false;
+        }, 50);
     };
 
     const getProjectName = (projectId: string) => {
@@ -1244,20 +1325,7 @@ export default function TimeTrackerPage() {
         checkIn();
     };
 
-    useEffect(() => {
-        if (!activeEntry) {
-            setElapsed(0);
-            return;
-        }
-
-        const interval = setInterval(() => {
-            const start = new Date(activeEntry.startTime).getTime();
-            const now = Date.now();
-            setElapsed(Math.floor((now - start) / 1000));
-        }, 1000);
-
-        return () => clearInterval(interval);
-    }, [activeEntry]);
+    
 
 
     return (
@@ -1497,7 +1565,7 @@ export default function TimeTrackerPage() {
                                                         <>
                                                             <PauseIcon className="h-5 w-5 text-orange-600 dark:text-orange-400" />
                                                             <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
-                                                                Idle Time Detected
+                                                                Idle Time Detected (Frozen at: {formatTime(elapsed)})
                                                             </span>
                                                         </>
                                                     ) : (
@@ -1665,6 +1733,41 @@ export default function TimeTrackerPage() {
                                             </button>
                                         </div>
                                     )}
+
+                                    {/* Debug Controls */}
+                                    <div className="mt-4 flex gap-2">
+                                        <button
+                                            onClick={() => {
+                                                console.log('🧪 Manual IDLE test triggered');
+                                                const mockIdleData = {
+                                                    type: 'IDLE',
+                                                    idleTime: 60,
+                                                    timestamp: Date.now()
+                                                };
+                                                // Manually trigger the idle logic
+                                                if (persistentCacheRef.current || cachedActiveEntry || activeEntry) {
+                                                    handleTimerPause();
+                                                    setTimerStatus('idle');
+                                                    setShowIdleNotification(true);
+                                                }
+                                            }}
+                                            className="px-3 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600"
+                                        >
+                                            Test Idle
+                                        </button>
+                                        <button
+                                            onClick={() => {
+                                                console.log('🧪 Manual ACTIVE test triggered');
+                                                if (isTimerPausedRef.current) {
+                                                    handleTimerResume();
+                                                    setShowIdleNotification(false);
+                                                }
+                                            }}
+                                            className="px-3 py-1 text-xs bg-green-500 text-white rounded hover:bg-green-600"
+                                        >
+                                            Test Resume
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
 

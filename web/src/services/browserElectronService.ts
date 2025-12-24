@@ -32,6 +32,7 @@ class BrowserElectronService {
 
   private async checkAvailability(): Promise<void> {
     try {
+      console.log('🔍 Checking Electron availability at:', `${this.ELECTRON_URL}/activity-status`);
       const response = await fetch(`${this.ELECTRON_URL}/activity-status`, {
         method: 'GET',
         headers: {
@@ -39,10 +40,17 @@ class BrowserElectronService {
         },
       });
       this.isAvailable = response.ok;
-      console.log('Electron service available:', this.isAvailable);
+      console.log('🔍 Response status:', response.status, response.statusText);
+      console.log('🔍 Response headers:', Object.fromEntries(response.headers.entries()));
+      if (response.ok) {
+        const data = await response.json();
+        console.log('🔍 Response data:', data);
+      }
+      console.log('✅ Electron service available:', this.isAvailable);
     } catch (error) {
       this.isAvailable = false;
-      console.log('Electron service not available:', error instanceof Error ? error.message : String(error));
+      console.log('❌ Electron service not available:', error instanceof Error ? error.message : String(error));
+      console.log('❌ Error details:', error);
     }
   }
 
@@ -214,6 +222,14 @@ class BrowserElectronService {
   // Method to retry checking availability
   async retryConnection(): Promise<boolean> {
     await this.checkAvailability();
+    return this.isAvailable;
+  }
+
+  // Force immediate availability check
+  async forceCheckAvailability(): Promise<boolean> {
+    console.log('🔄 Forcing immediate availability check...');
+    await this.checkAvailability();
+    console.log('🔄 Force check result:', this.isAvailable);
     return this.isAvailable;
   }
 }

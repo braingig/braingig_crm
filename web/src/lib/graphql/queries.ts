@@ -429,3 +429,9 @@ export const DELETE_PROJECT = gql`
     deleteProject(id: $id)
   }
 `;
+
+export const REPORT_ACTIVITY = gql`
+  mutation ReportActivity($type: String!, $metadata: JSON) {
+    reportActivity(type: $type, metadata: $metadata)
+  }
+`;

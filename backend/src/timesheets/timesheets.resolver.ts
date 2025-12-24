@@ -1,4 +1,5 @@
 import { Resolver, Query, Mutation, Args } from '@nestjs/graphql';
+import { GraphQLJSON } from '../common/scalars/json.scalar';
 import { UseGuards } from '@nestjs/common';
 import { TimesheetsService } from './timesheets.service';
 import { GqlAuthGuard } from '../auth/guards/gql-auth.guard';
@@ -99,12 +100,12 @@ export class TimesheetsResolver {
     async reportActivity(
         @CurrentUser() user: any,
         @Args('type', { type: () => String }) type: string,
-        @Args('metadata', { type: () => String, nullable: true }) metadata?: string,
+        @Args('metadata', { type: () => GraphQLJSON, nullable: true }) metadata?: any,
     ) {
         await this.timesheetsService.reportActivity(
             user.userId,
             type,
-            metadata ? JSON.parse(metadata) : null,
+            metadata,
         );
         return true;
     }

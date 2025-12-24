@@ -368,8 +368,16 @@ export class TimesheetsService {
     }
 
     async reportActivity(employeeId: string, type: string, metadata?: any) {
+        // Log the activity event
         await this.prisma.activityEvent.create({
-            data: { employeeId, type, metadata },
+            data: { 
+                employeeId, 
+                type, 
+                metadata: {
+                    ...metadata,
+                    timestamp: new Date().toISOString()
+                }
+            },
         });
 
         const activeEntry = await this.prisma.timeEntry.findFirst({
@@ -378,11 +386,33 @@ export class TimesheetsService {
 
         if (!activeEntry) return;
 
-        if (type === 'IDLE' || type === 'LOCK') {
-            await this.stopTimeEntry(employeeId);
-        }
+        switch (type) {
+            case 'IDLE':
+            case 'LOCK':
+                // User went idle - stop the current timer
+                console.log(`User ${employeeId} went idle, stopping timer`);
+                await this.stopTimeEntry(employeeId);
+                break;
 
-        if (type === 'ACTIVE') {
+            case 'ACTIVE':
+                // User became active again - if they were working before, we might want to restart
+                // But for now, we'll just log it since manual restart gives user control
+                console.log(`User ${employeeId} became active again`);
+                break;
+
+            case 'TRACKING_STARTED':
+                // Activity tracking started
+                console.log(`Activity tracking started for user ${employeeId}`);
+                break;
+
+            case 'TRACKING_STOPPED':
+                // Activity tracking stopped
+                console.log(`Activity tracking stopped for user ${employeeId}`);
+                break;
+
+            default:
+                console.log(`Unknown activity type: ${type} for user ${employeeId}`);
+                break;
         }
     }
 

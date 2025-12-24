@@ -1,9 +1,11 @@
 'use client';
 
 import { useQuery, useMutation, useApolloClient } from '@apollo/client';
-import { GET_ACTIVE_TIME_ENTRY, GET_TODAY_TIMESHEET, GET_TODAY_SESSIONS, GET_TIME_ENTRIES, GET_TIMESHEETS, CHECK_IN, CHECK_OUT, START_TIME_ENTRY, STOP_TIME_ENTRY, GET_PROJECTS, GET_TASKS, GET_ME, GET_EMPLOYEE_WORK_TYPE, UPDATE_EMPLOYEE_WORK_TYPE } from '@/lib/graphql/queries';
+import { GET_ACTIVE_TIME_ENTRY, GET_TODAY_TIMESHEET, GET_TODAY_SESSIONS, GET_TIME_ENTRIES, GET_TIMESHEETS, CHECK_IN, CHECK_OUT, START_TIME_ENTRY, STOP_TIME_ENTRY, GET_PROJECTS, GET_TASKS, GET_ME, GET_EMPLOYEE_WORK_TYPE, UPDATE_EMPLOYEE_WORK_TYPE, REPORT_ACTIVITY } from '@/lib/graphql/queries';
 import { WorkType } from '@/types';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { electronService } from '@/services/electronService';
+import { browserElectronService } from '@/services/browserElectronService';
 import {
     ClockIcon,
     PlayIcon,
@@ -50,6 +52,12 @@ export default function TimeTrackerPage() {
     const [isTimerPaused, setIsTimerPaused] = useState(false);
     const [pauseStartTime, setPauseStartTime] = useState<number | null>(null);
     const [accumulatedTime, setAccumulatedTime] = useState(0);
+    const [cachedActiveEntry, setCachedActiveEntry] = useState<any>(null);
+    
+    // Persistent cache refs to survive React re-renders
+    const persistentCacheRef = useRef<any>(null);
+    const cacheInitializedRef = useRef(false);
+    const isTimerPausedRef = useRef(false); // Keep current isTimerPaused value for activity listener
     const [isTabVisible, setIsTabVisible] = useState(true);
     const [isStopping, setIsStopping] = useState(false);
     const [timerStatus, setTimerStatus] = useState<'running' | 'paused' | 'idle'>('running');
@@ -58,7 +66,10 @@ export default function TimeTrackerPage() {
     const [idleStartTime, setIdleStartTime] = useState<number | null>(null);
     const [showIdleSettings, setShowIdleSettings] = useState(false);
 
-
+    // Electron integration state
+    const [isElectron, setIsElectron] = useState(false);
+    const [electronTrackingEnabled, setElectronTrackingEnabled] = useState(false);
+    const [activityStatus, setActivityStatus] = useState<any>(null);
 
     // Apollo Client for cache management
     const client = useApolloClient();
@@ -71,6 +82,11 @@ export default function TimeTrackerPage() {
 
     // Get current user ID for filtering
     const currentUserId = meData?.me?.id;
+
+    // Keep isTimerPausedRef in sync with state
+    useEffect(() => {
+        isTimerPausedRef.current = isTimerPaused;
+    }, [isTimerPaused]);
 
     // Get employee work type
     const { data: workTypeData, refetch: refetchWorkType } = useQuery(GET_EMPLOYEE_WORK_TYPE, {
@@ -132,6 +148,56 @@ export default function TimeTrackerPage() {
     const employeeWorkType = workTypeData?.employeeWorkType || WorkType.REMOTE;
     const allProjects = projectsData?.projects || [];
     const myTasks = myTasksData?.tasks || [];
+
+    // Initialize persistent cache on component mount
+    useEffect(() => {
+        if (!cacheInitializedRef.current) {
+            // Clear any old sessionStorage cache to avoid conflicts
+            try {
+                sessionStorage.removeItem('cachedActiveEntry');
+            } catch (error) {
+                // Ignore errors
+            }
+            
+            // Try to restore from localStorage (more persistent than sessionStorage)
+            try {
+                const storedCache = localStorage.getItem('cachedActiveEntry');
+                if (storedCache) {
+                    const parsedCache = JSON.parse(storedCache);
+                    persistentCacheRef.current = parsedCache;
+                    console.log('🔄 Restored cache from localStorage:', parsedCache);
+                } else {
+                    console.log('📭 No cached entry found in localStorage');
+                }
+            } catch (error) {
+                console.error('❌ Error restoring cache:', error);
+            }
+            cacheInitializedRef.current = true;
+        }
+    }, []);
+
+    // Simple cache sync - only update localStorage when cache changes (not on mount)
+    useEffect(() => {
+        // Skip initial mount sync
+        if (!cacheInitializedRef.current) return;
+        
+        // Update localStorage when cache changes
+        try {
+            if (cachedActiveEntry) {
+                localStorage.setItem('cachedActiveEntry', JSON.stringify(cachedActiveEntry));
+                console.log('💾 Saved cache to localStorage');
+            } else {
+                localStorage.removeItem('cachedActiveEntry');
+                console.log('🗑️ Removed cache from localStorage');
+            }
+        } catch (error) {
+            console.error('❌ Error saving cache:', error);
+        }
+        
+        // Keep ref in sync
+        persistentCacheRef.current = cachedActiveEntry;
+    }, [cachedActiveEntry]);
+    
     const tasks = tasksData?.tasks || [];
 
     // Filter projects to only show those that have tasks assigned to current user
@@ -250,9 +316,23 @@ export default function TimeTrackerPage() {
         }
     });
     const [startTimer] = useMutation(START_TIME_ENTRY, {
-        onCompleted: () => {
-            refetchActiveEntry();
-            refetchTimeEntries();
+        onCompleted: async () => {
+            console.log('✅ Timer started successfully!');
+            // Add delay before refetch to let backend process
+            setTimeout(async () => {
+                console.log('🔄 Refetching immediately after timer start...');
+                const result = await refetchActiveEntry();
+                console.log('📊 Post-start refetch data:', JSON.stringify(result.data, null, 2));
+                
+                // Cache the active entry for pause/resume logic
+                if (result.data?.activeTimeEntry) {
+                    console.log('💾 Caching active entry:', result.data.activeTimeEntry);
+                    console.log('💾 Cache state BEFORE setCachedActiveEntry:', cachedActiveEntry);
+                    setCachedActiveEntry(result.data.activeTimeEntry);
+                    console.log('✅ Cache set successfully');
+                }
+            }, 1000);
+            // refetchTimeEntries(); // Removed - causes activeEntry to change and override pause state
             setSelectedProject('');
             setSelectedTask('');
             setTaskDescription('');
@@ -261,10 +341,17 @@ export default function TimeTrackerPage() {
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'timeEntries' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
+        },
+        onError: (error) => {
+            console.error('Error starting timer:', error);
+            alert('Failed to start timer. Please check if the backend is running.');
         }
     });
     const [stopTimer] = useMutation(STOP_TIME_ENTRY, {
         onCompleted: () => {
+            console.log('⛔ Timer stopped automatically! (This should only appear when user manually stops timer)');
+            console.log('🗑️ Clearing cached entry due to manual timer stop');
+            setCachedActiveEntry(null); // Clear cached entry
             refetchActiveEntry();
             refetchTimeEntries();
             setIsStopping(false); // Reset stopping flag after successful stop
@@ -273,6 +360,11 @@ export default function TimeTrackerPage() {
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'timeEntries' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
+        },
+        onError: (error) => {
+            console.error('Error stopping timer:', error);
+            setIsStopping(false); // Reset stopping flag on error
+            alert('Failed to stop timer. Please check if the backend is running.');
         }
     });
 
@@ -287,6 +379,196 @@ export default function TimeTrackerPage() {
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'todaySessions' });
         }
     });
+
+    const [reportActivity] = useMutation(REPORT_ACTIVITY, {
+        onError: (error) => {
+            console.error('Error reporting activity:', error);
+        }
+    });
+
+    // Electron initialization and integration
+    useEffect(() => {
+        const isRunningInElectron = electronService.isRunningInElectron;
+        setIsElectron(isRunningInElectron);
+
+        // Always try to initialize tracking if we have a user ID
+        if (currentUserId) {
+            // Initialize Electron activity tracking (will try browser service first, then IPC)
+            initializeElectronTracking();
+        }
+
+        return () => {
+            // Cleanup Electron listeners on unmount
+            if (isRunningInElectron) {
+                electronService.removeActivityStatusListener();
+            }
+            
+            // Stop browser electron service if it was active
+            if (browserElectronService.isServiceAvailable && electronTrackingEnabled) {
+                browserElectronService.stopActivityTracking();
+            }
+        };
+    }, [currentUserId]);
+
+    const initializeElectronTracking = async () => {
+        console.log('🔧 Initializing Electron tracking...');
+        console.log('📋 Current User ID:', currentUserId);
+
+        if (!currentUserId) {
+            console.error('❌ Cannot start Electron tracking: No user ID');
+            return;
+        }
+
+        // Try browser electron service first (for regular browser usage)
+        console.log('🌐 Checking browser electron service availability...');
+        if (browserElectronService.isServiceAvailable) {
+            console.log('✅ Browser electron service available');
+            
+            try {
+                const token = localStorage.getItem('accessToken');
+                console.log('🔑 Access token found:', !!token);
+                
+                if (!token) {
+                    console.error('❌ No access token found');
+                    return;
+                }
+
+                // Start activity tracking via HTTP
+                console.log('🚀 Starting activity tracking for user:', currentUserId);
+                const trackingStarted = await browserElectronService.startActivityTracking(currentUserId, token);
+              console.log('📊 Tracking started result:', trackingStarted);
+              setElectronTrackingEnabled(trackingStarted.success && trackingStarted.tracking);
+  
+              if (trackingStarted.success && trackingStarted.tracking) {
+                      console.log('✅ Browser electron activity tracking started for user:', currentUserId);
+
+                    // Listen for activity status updates via SSE
+                    const unsubscribe = browserElectronService.onActivityStatus(async (data) => {
+                        console.log('📨 Activity status from Electron:', data);
+                        setActivityStatus(data);
+
+                        // Use persistent cache reference to avoid React re-mount issues
+                        const currentActiveEntry = persistentCacheRef.current || cachedActiveEntry;
+                        console.log('💰 Using persistent cache for activity handling');
+                        console.log('💰 persistentCacheRef:', persistentCacheRef.current);
+                        console.log('💰 cachedActiveEntry state:', cachedActiveEntry);
+                        console.log('💰 Final currentActiveEntry:', currentActiveEntry);
+
+                        // Handle activity changes with persistent cached activeEntry
+                        console.log('🔍 Activity check - data.type:', data.type, 'currentActiveEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPausedRef.current);
+                        
+                        if (data.type === 'IDLE' && currentActiveEntry) {
+                            // User went idle - pause the timer
+                            console.log('🔴 IDLE detected, pausing timer. cachedEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPausedRef.current);
+                            console.log('🔴 About to call handleTimerPause()');
+                            handleTimerPause(); // Call immediately instead of setTimeout
+                        } else if (data.type === 'ACTIVE' && currentActiveEntry && isTimerPausedRef.current) {
+                            // User became active again - resume the timer
+                            console.log('🟢 ACTIVE detected, resuming timer. cachedEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPausedRef.current);
+                            console.log('🟢 About to call handleTimerResume()');
+                            handleTimerResume(); // Call immediately instead of setTimeout
+                        } else {
+                            console.log('⚪ Activity event not triggering timer action. type:', data.type, 'cachedEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPausedRef.current);
+                            if (data.type === 'IDLE' && !currentActiveEntry) {
+                                console.log('❌ IDLE detected but NO currentActiveEntry - timer not started?');
+                            }
+                            if (data.type === 'ACTIVE' && currentActiveEntry && !isTimerPausedRef.current) {
+                                console.log('ℹ️ ACTIVE detected but timer not paused - already running');
+                            }
+                        }
+
+                        // Report activity to backend
+                        reportActivity({
+                            variables: {
+                                type: data.type,
+                                metadata: {
+                                    idleTime: data.idleTime,
+                                    timestamp: data.timestamp,
+                                    source: 'electron-desktop'
+                                }
+                            }
+                        });
+                    });
+
+                    return unsubscribe;
+                }
+            } catch (error) {
+                console.error('❌ Failed to start browser electron tracking:', error);
+            }
+        } else {
+            console.log('⚠️ Browser electron service not available, falling back to IPC service...');
+            
+            // Fallback to original IPC service if running inside Electron
+            if (electronService.isRunningInElectron) {
+                console.log('🌐 Is Electron running:', electronService.isRunningInElectron);
+
+                try {
+                    const token = localStorage.getItem('accessToken');
+                    console.log('🔑 Access token found:', !!token);
+                    
+                    if (token) {
+                        await electronService.saveToken(token);
+                        console.log('✅ Auth token saved to Electron');
+                    }
+
+                    // Start activity tracking in Electron
+                    console.log('🚀 Starting activity tracking for user:', currentUserId);
+                    const trackingStarted = await electronService.startActivityTracking(currentUserId);
+                    console.log('📊 Tracking started result:', trackingStarted);
+                    setElectronTrackingEnabled(trackingStarted);
+
+                    if (trackingStarted) {
+                        console.log('✅ Electron activity tracking started for user:', currentUserId);
+
+                        // Listen for activity status updates from Electron
+                        electronService.onActivityStatus((data) => {
+                            console.log('📨 Activity status from Electron:', data);
+                            setActivityStatus(data);
+
+                            // Handle activity changes
+                            if (data.type === 'IDLE' && activeEntry) {
+                                // User went idle - stop the timer
+                                handleTimerPause();
+                            } else if (data.type === 'ACTIVE' && activeEntry && isTimerPaused) {
+                                // User became active again - resume the timer
+                                handleTimerResume();
+                            }
+
+                            // Report activity to backend
+                            reportActivity({
+                                variables: {
+                                    type: data.type,
+                                    metadata: {
+                                        idleTime: data.idleTime,
+                                        timestamp: data.timestamp,
+                                        source: 'electron-desktop'
+                                    }
+                                }
+                            });
+                        });
+                    }
+                } catch (error) {
+                    console.error('❌ Failed to start IPC electron tracking:', error);
+                }
+            } else {
+                console.log('❌ Neither browser nor IPC electron service available');
+            }
+        }
+    };
+
+    // Stop Electron tracking when component unmounts or user logs out
+    useEffect(() => {
+        return () => {
+            if (electronTrackingEnabled) {
+                // Try browser service first
+                if (browserElectronService.isServiceAvailable) {
+                    browserElectronService.stopActivityTracking();
+                }
+                // Fallback to IPC service
+                electronService.stopActivityTracking();
+            }
+        };
+    }, [electronTrackingEnabled]);
 
     // Error handling effects
     useEffect(() => {
@@ -321,14 +603,28 @@ export default function TimeTrackerPage() {
 
     // Initialize timer when active entry starts
     useEffect(() => {
+        console.log('🔄 Active entry effect RUNNING - activeEntry.id:', activeEntry?.id, 'isTimerPaused:', isTimerPaused);
         if (activeEntry) {
-            // New active entry started, reset accumulated time
-            setAccumulatedTime(0);
-            setIsTimerPaused(false);
-            setPauseStartTime(null);
-            setIsStopping(false); // Reset stopping flag for new timer
+            // Check if this is actually a new entry (different from cached)
+            const currentCache = persistentCacheRef.current;
+            const isNewEntry = !currentCache || currentCache.id !== activeEntry.id;
+            
+            console.log('🔄 Active entry effect - isNewEntry:', isNewEntry, 'currentIsPaused:', isTimerPaused);
+            
+            if (isNewEntry) {
+                // New active entry started, reset accumulated time
+                console.log('🆕 New timer entry detected, resetting state');
+                setAccumulatedTime(0);
+                setIsTimerPaused(false);
+                setPauseStartTime(null);
+                setIsStopping(false); // Reset stopping flag for new timer
+            } else {
+                // Same entry, don't reset pause state
+                console.log('🔄 Same timer entry detected, preserving pause state');
+            }
         } else {
             // Reset when no active entry
+            console.log('🚫 No active entry, resetting all state');
             setAccumulatedTime(0);
             setPauseStartTime(null);
             setIsTimerPaused(false);
@@ -517,25 +813,38 @@ export default function TimeTrackerPage() {
 
     // Enhanced timer effect - counts total elapsed time minus inactive periods with status awareness
     useEffect(() => {
-        if (activeEntry && !isTimerPaused && timerStatus === 'running') {
+        // Use persistent cache reference to avoid React re-mount issues
+        const timerEntry = activeEntry || persistentCacheRef.current || cachedActiveEntry;
+        
+        console.log('⏱️ Timer effect triggered:', {
+            timerEntry: !!timerEntry,
+            isTimerPaused,
+            isTimerPausedRef: isTimerPausedRef.current,
+            timerStatus,
+            elapsed,
+            persistentCache: !!persistentCacheRef.current,
+            cachedState: !!cachedActiveEntry
+        });
+        
+        if (timerEntry && !isTimerPausedRef.current && timerStatus === 'running') {
             // Timer is running - update every second
             const interval = setInterval(() => {
-                const start = new Date(activeEntry.startTime).getTime();
+                const start = new Date(timerEntry.startTime).getTime();
                 const now = Date.now();
                 const totalElapsed = Math.floor((now - start) / 1000);
                 const adjustedElapsed = totalElapsed - accumulatedTime;
                 setElapsed(Math.max(0, adjustedElapsed));
             }, 1000);
             return () => clearInterval(interval);
-        } else if (activeEntry && (isTimerPaused || timerStatus !== 'running')) {
-            // Timer is paused or idle - show static time
-            const start = new Date(activeEntry.startTime).getTime();
+        } else if (timerEntry && (isTimerPausedRef.current || timerStatus === 'idle')) {
+            // Timer is paused or idle - show static time, DO NOT change state
+            const start = new Date(timerEntry.startTime).getTime();
             const referenceTime = pauseStartTime || idleStartTime || Date.now();
             const totalElapsed = Math.floor((referenceTime - start) / 1000);
             const adjustedElapsed = totalElapsed - accumulatedTime;
             setElapsed(Math.max(0, adjustedElapsed));
         }
-    }, [activeEntry, isTimerPaused, timerStatus, accumulatedTime, pauseStartTime, idleStartTime]);
+    }, [activeEntry, accumulatedTime, idleStartTime]);
 
     // Stop timer when user closes browser window or navigates away
     // useEffect(() => {
@@ -832,6 +1141,15 @@ export default function TimeTrackerPage() {
     };
 
     const handleStartTimer = () => {
+        console.log('🚀 handleStartTimer called!');
+        
+        // Check if mutation is available
+        if (!startTimer) {
+            console.error('❌ startTimer mutation not available');
+            alert('Timer functionality is not available. Please check if the backend is running.');
+            return;
+        }
+
         // If user has assigned tasks, require task selection
         if (hasAssignedTasks && !selectedTask) {
             alert('Please select a task before starting the timer');
@@ -852,6 +1170,52 @@ export default function TimeTrackerPage() {
                 }
             }
         });
+    };
+
+    const handleTimerPause = () => {
+        // Use persistent cache reference to avoid React re-mount issues
+        const currentEntry = persistentCacheRef.current || cachedActiveEntry;
+        if (!currentEntry) {
+            console.log('🔴 Cannot pause - no cached active entry');
+            return;
+        }
+        
+        console.log('🔴 Pausing timer due to inactivity. cachedEntry:', currentEntry);
+        console.log('🔴 Timer entry details:', {
+            id: currentEntry.id,
+            startTime: currentEntry.startTime,
+            endTime: currentEntry.endTime,
+            duration: currentEntry.duration
+        });
+        console.log('🔴 About to set isTimerPaused to true (current value:', isTimerPaused, ')');
+        setIsTimerPaused(true);
+        setTimerStatus('idle');
+        setPauseStartTime(Date.now());
+        setShowIdleNotification(true);
+        
+        console.log('🔴 PAUSE STATE SET - isTimerPaused should now be true');
+    };
+
+    const handleTimerResume = () => {
+        // Use persistent cache reference to avoid React re-mount issues
+        const currentEntry = persistentCacheRef.current || cachedActiveEntry;
+        if (!currentEntry) {
+            console.log('🟢 Cannot resume - no cached active entry');
+            return;
+        }
+        
+        console.log('🟢 Resuming timer after activity');
+        setIsTimerPaused(false);
+        setShowIdleNotification(false);
+        
+        // Calculate and add the inactive period
+        if (pauseStartTime) {
+            const inactiveDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
+            if (inactiveDuration > 0) {
+                setAccumulatedTime(prev => prev + inactiveDuration);
+            }
+        }
+        setPauseStartTime(null);
     };
 
     const getProjectName = (projectId: string) => {
@@ -1155,6 +1519,27 @@ export default function TimeTrackerPage() {
                                                         Timer is manually paused
                                                     </p>
                                                 )}
+                                                
+                                                {/* Electron Activity Tracking Status */}
+                                                {isElectron && (
+                                                    <div className={`mt-2 p-2 rounded text-xs flex items-center justify-center space-x-1 ${
+                                                        electronTrackingEnabled 
+                                                            ? 'bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200' 
+                                                            : 'bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
+                                                    }`}>
+                                                        {electronTrackingEnabled ? (
+                                                            <>
+                                                                <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+                                                                <span>System Activity Tracking Active</span>
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <div className="w-2 h-2 bg-gray-400 rounded-full"></div>
+                                                                <span>System Activity Tracking Inactive</span>
+                                                            </>
+                                                        )}
+                                                    </div>
+                                                )}
                                             </div>
 
 
@@ -1169,7 +1554,13 @@ export default function TimeTrackerPage() {
                                                 )}
                                             </div>
                                             <button
-                                                onClick={() => stopTimer()}
+                                                onClick={() => {
+                                                    if (!stopTimer) {
+                                                        alert('Timer functionality is not available. Please check if the backend is running.');
+                                                        return;
+                                                    }
+                                                    stopTimer();
+                                                }}
                                                 className="w-full inline-flex items-center justify-center px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
                                             >
                                                 <StopIcon className="h-5 w-5 mr-2" />

@@ -389,14 +389,17 @@ export class TimesheetsService {
         switch (type) {
             case 'IDLE':
             case 'LOCK':
-                // User went idle - stop the current timer
-                console.log(`User ${employeeId} went idle, stopping timer`);
-                await this.stopTimeEntry(employeeId);
+                // User went idle - only stop if idle for more than 5 minutes to avoid interfering with manual control
+                if (metadata?.idleDuration && metadata.idleDuration > 5 * 60 * 1000) { // 5 minutes
+                    console.log(`User ${employeeId} idle for ${Math.floor(metadata.idleDuration / 60000)} minutes, stopping timer`);
+                    await this.stopTimeEntry(employeeId);
+                } else {
+                    console.log(`User ${employeeId} went idle briefly (${Math.floor((metadata?.idleDuration || 0) / 1000)}s), not stopping timer`);
+                }
                 break;
 
             case 'ACTIVE':
-                // User became active again - if they were working before, we might want to restart
-                // But for now, we'll just log it since manual restart gives user control
+                // User became active again - just log it since manual restart gives user control
                 console.log(`User ${employeeId} became active again`);
                 break;
 

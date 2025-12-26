@@ -8,8 +8,8 @@ export class TimerCleanupService {
 
     constructor(private prisma: PrismaService) {}
 
-    // Run every 5 minutes to clean up abandoned timers
-    @Cron('*/5 * * * *')
+    // Run every 10 minutes to clean up abandoned timers (reduced frequency)
+    @Cron('*/10 * * * *')
     async cleanupAbandonedTimers() {
         try {
             // Find all active time entries (entries without end time)
@@ -29,15 +29,26 @@ export class TimerCleanupService {
             });
 
             const now = new Date();
-            const abandonedThreshold = 30 * 60 * 1000; // 30 minutes in milliseconds
+            const abandonedThreshold = 2 * 60 * 60 * 1000; // 2 hours in milliseconds (increased from 30 minutes)
 
             for (const entry of activeEntries) {
                 const startTime = new Date(entry.startTime);
                 const timeSinceStart = now.getTime() - startTime.getTime();
 
-                // If timer has been running for more than 30 minutes without activity,
+                // Check for recent activity before stopping
+                const recentActivity = await (this.prisma as any).activityEvent.findFirst({
+                    where: {
+                        employeeId: entry.employeeId,
+                        type: 'ACTIVE',
+                        timestamp: {
+                            gte: new Date(now.getTime() - 30 * 60 * 1000), // Activity in last 30 minutes
+                        }
+                    }
+                });
+
+                // If timer has been running for more than 2 hours AND no recent activity,
                 // consider it abandoned and stop it
-                if (timeSinceStart > abandonedThreshold) {
+                if (timeSinceStart > abandonedThreshold && !recentActivity) {
                     const duration = Math.floor(timeSinceStart / (1000 * 60)); // Convert to minutes
 
                     await (this.prisma as any).timeEntry.update({
@@ -61,7 +72,11 @@ export class TimerCleanupService {
                     }
 
                     this.logger.log(
-                        `Auto-stopped abandoned timer for employee ${entry.employee.name} (${entry.employee.email}). Duration: ${duration} minutes`
+                        `Auto-stopped abandoned timer for employee ${entry.employee.name} (${entry.employee.email}). Duration: ${Math.floor(duration / 60)}h ${duration % 60}m (no recent activity)`
+                    );
+                } else if (timeSinceStart > abandonedThreshold && recentActivity) {
+                    this.logger.log(
+                        `Timer active for employee ${entry.employee.name} (${entry.employee.email}) but has recent activity - not stopping`
                     );
                 }
             }

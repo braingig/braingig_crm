@@ -52,14 +52,17 @@ export default function TimeTrackerPage() {
     const [lastActivity, setLastActivity] = useState(Date.now());
     const [isTimerPaused, setIsTimerPaused] = useState(false);
     const [pauseStartTime, setPauseStartTime] = useState<number | null>(null);
-    const [accumulatedTime, setAccumulatedTime] = useState(0);
+    const [totalWorkingTime, setTotalWorkingTime] = useState(0);
+    const [isPaused, setIsPaused] = useState(false);
     const [cachedActiveEntry, setCachedActiveEntry] = useState<any>(null);
     
     // Persistent cache refs to survive React re-renders
     const persistentCacheRef = useRef<any>(null);
     const cacheInitializedRef = useRef(false);
     const isTimerPausedRef = useRef(false); // Keep current isTimerPaused value for activity listener
+    const isPausedRef = useRef(false); // Keep current isPaused value for timer interval
     const timerIntervalRef = useRef<NodeJS.Timeout | null>(null); // Store current timer interval
+    const actualElapsedRef = useRef(0); // Track actual elapsed time independently of state
     const isUpdatingStateRef = useRef(false); // Prevent rapid state updates
     const [isTabVisible, setIsTabVisible] = useState(true);
     const [isStopping, setIsStopping] = useState(false);
@@ -516,8 +519,10 @@ export default function TimeTrackerPage() {
                         } else if (data.type === 'ACTIVE' && currentActiveEntry && isTimerPausedRef.current) {
                             // User became active again - resume the timer
                             console.log('🟢 ACTIVE detected, resuming timer. cachedEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPausedRef.current);
+                            console.log('🟢 Electron data:', data);
+                            console.log('🟢 Electron idleTime:', data.idleTime);
                             console.log('🟢 About to call handleTimerResume()');
-                            handleTimerResume(); // Call immediately instead of setTimeout
+                            handleTimerResume(data.idleTime || 0); // Pass Electron's idle time
                         } else {
                             console.log('⚪ Activity event not triggering timer action. type:', data.type, 'cachedEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPausedRef.current);
                             if (data.type === 'IDLE' && !currentActiveEntry) {
@@ -671,25 +676,45 @@ export default function TimeTrackerPage() {
             const isNewEntry = !currentCache || currentCache.id !== activeEntry.id;
             
             console.log('🔄 Active entry effect - isNewEntry:', isNewEntry, 'currentIsPaused:', isTimerPaused);
+            console.log('🔄 Active entry effect STATE - totalWorkingTime:', totalWorkingTime, 'elapsed:', elapsed);
             
             if (isNewEntry) {
-                // New active entry started, reset accumulated time
-                console.log('🆕 New timer entry detected, resetting state');
-                setAccumulatedTime(0);
-                setIsTimerPaused(false);
-                setPauseStartTime(null);
-                setIsStopping(false); // Reset stopping flag for new timer
+                // New active entry started, reset working time state only if we don't have existing working time
+                if (totalWorkingTime === 0 && elapsed === 0) {
+                    console.log('🆕 New timer entry detected, resetting state');
+                    setTotalWorkingTime(0);
+                    setElapsed(0);
+                    setIsPaused(false);
+                    setIsTimerPaused(false);
+                    setPauseStartTime(null);
+                    setIsStopping(false); // Reset stopping flag for new timer
+                    // Initialize refs
+                    isPausedRef.current = false;
+                    isTimerPausedRef.current = false;
+                    console.log('🆕 New timer initialized - isPausedRef:', isPausedRef.current, 'isTimerPausedRef:', isTimerPausedRef.current);
+                } else {
+                    console.log('🔄 Existing entry with working time, preserving state');
+                    // Preserve existing working time
+                }
             } else {
                 // Same entry, don't reset pause state
                 console.log('🔄 Same timer entry detected, preserving pause state');
             }
         } else {
             // Reset when no active entry, but don't interfere with ongoing stop process
-            console.log('🚫 No active entry, resetting timer state (preserving isStopping flag)');
-            setAccumulatedTime(0);
-            setPauseStartTime(null);
-            setIsTimerPaused(false);
-            // Don't reset isStopping here - let the stop mutation handlers manage it
+            // Only reset if we have working time to clear (prevent unnecessary resets)
+            if (totalWorkingTime > 0 || elapsed > 0) {
+                console.log('🚫 No active entry, resetting timer state (preserving isStopping flag)');
+                console.log('🚨 RESET TRIGGERED - setting totalWorkingTime and elapsed to 0');
+                setTotalWorkingTime(0);
+                setElapsed(0);
+                setIsPaused(false);
+                setPauseStartTime(null);
+                setIsTimerPaused(false);
+                // Don't reset isStopping here - let the stop mutation handlers manage it
+            } else {
+                console.log('🚫 No active entry and no working time, state already clean');
+            }
         }
     }, [activeEntry?.id]); // Only re-run when active entry ID changes
 
@@ -850,39 +875,57 @@ export default function TimeTrackerPage() {
 
     // Fallback idle detection removed - Electron service handles all idle detection
 
-    // Enhanced timer effect - counts total elapsed time minus inactive periods with status awareness
+    // Enhanced timer effect - tracks actual working time without idle periods
     useEffect(() => {
         // Use persistent cache reference to avoid React re-mount issues
         const timerEntry = activeEntry || persistentCacheRef.current || cachedActiveEntry;
         
-        console.log('⏱️ Timer effect triggered:', {
-            timerEntry: !!timerEntry,
-            isTimerPaused,
-            isTimerPausedRef: isTimerPausedRef.current,
-            timerStatus,
-            elapsed,
-            persistentCache: !!persistentCacheRef.current,
-            cachedState: !!cachedActiveEntry
-        });
+
         
         // Clear any existing interval first
         if (timerIntervalRef.current) {
-            console.log('⏱️ Clearing existing timer interval');
+
             clearInterval(timerIntervalRef.current);
             timerIntervalRef.current = null;
         }
 
         if (timerEntry && !isTimerPausedRef.current && timerStatus === 'running') {
             // Timer is running - update every second
-            console.log('⏱️ TIMER RUNNING - Starting interval to update elapsed time');
-            timerIntervalRef.current = setInterval(() => {
-                const start = new Date(timerEntry.startTime).getTime();
-                const now = Date.now();
-                const totalElapsed = Math.floor((now - start) / 1000);
-                const adjustedElapsed = totalElapsed - accumulatedTime;
+
+            console.log('⏱️ Timer conditions met - timerEntry:', !!timerEntry, 'isTimerPausedRef:', isTimerPausedRef.current, 'timerStatus:', timerStatus, 'isPausedRef:', isPausedRef.current);
+        console.log('⏱️ State vs Ref - isTimerPaused(state):', isTimerPaused, 'isPaused(state):', isPaused);
+        
+        // Create timer interval (clear any existing interval first)
+        if (timerIntervalRef.current) {
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+            console.log('⏱️ Cleared existing timer interval');
+        }
+        
+        const intervalId = Date.now();
+        console.log('⏱️ Creating new timer interval:', intervalId);
+        
+        // Sync ref with current state and calculate start time
+        actualElapsedRef.current = totalWorkingTime;
+        const startTime = Date.now() - (actualElapsedRef.current * 1000);
+        console.log('⏱️ Timer starting - synced ref to state:', actualElapsedRef.current, 'seconds, startTime:', startTime);
+        
+        timerIntervalRef.current = setInterval(() => {
+            if (!isPausedRef.current) {
+                // Calculate elapsed time based on start time (more reliable than incremental updates)
+                const currentElapsed = Math.floor((Date.now() - startTime) / 1000);
+                actualElapsedRef.current = currentElapsed; // Update ref immediately
                 
-                setElapsed(Math.max(0, adjustedElapsed));
-            }, 1000);
+                setTotalWorkingTime(currentElapsed);
+                setElapsed(currentElapsed);
+                
+                // Log every 5 seconds to reduce spam
+                if (currentElapsed % 5 === 0) {
+                    console.log('⏱️ Timer working (ref-based):', currentElapsed, 'seconds elapsed (ref:', actualElapsedRef.current, ')');
+                }
+            }
+        }, 1000); // Update every second for consistency and performance
+            
             return () => {
                 if (timerIntervalRef.current) {
                     clearInterval(timerIntervalRef.current);
@@ -891,11 +934,10 @@ export default function TimeTrackerPage() {
             };
         } else if (timerEntry && (isTimerPausedRef.current || timerStatus === 'idle')) {
             // Timer is paused or idle - FREEZE the display time, DO NOT update
-            console.log('⏱️ TIMER PAUSED/IDLE - isTimerPausedRef:', isTimerPausedRef.current, 'timerStatus:', timerStatus);
-            console.log('⏱️ FREEZING elapsed time at current value:', elapsed);
+
             // Do NOT update elapsed time - keep it frozen at the pause moment
         }
-    }, [activeEntry, accumulatedTime, idleStartTime, isTimerPaused, timerStatus, pauseStartTime]);
+    }, [activeEntry, isPaused, isTimerPaused, timerStatus]);
 
     // Stop timer when user closes browser window or navigates away
     // useEffect(() => {
@@ -1213,6 +1255,9 @@ export default function TimeTrackerPage() {
             return;
         }
 
+        // Set timer status to running when starting
+        setTimerStatus('running');
+        
         startTimer({
             variables: {
                 input: {
@@ -1250,29 +1295,38 @@ export default function TimeTrackerPage() {
             endTime: currentEntry.endTime,
             duration: currentEntry.duration
         });
-        console.log('🔴 About to set isTimerPaused to true (current value:', isTimerPaused, ')');
+        console.log('🔴 About to set isTimerPaused to true (current value: false )');
+        console.log('🔴 STATE BEFORE PAUSE - elapsed:', elapsed, 'totalWorkingTime:', totalWorkingTime, 'isPaused:', isPaused, 'actualElapsedRef:', actualElapsedRef.current);
         
         // Force clear any running timer interval immediately
         if (timerIntervalRef.current) {
-            console.log('🔴 Force clearing timer interval during pause');
+            console.log('🔴 Force clearing timer interval during pause - was interval running?');
             clearInterval(timerIntervalRef.current);
             timerIntervalRef.current = null;
+        } else {
+            console.log('🔴 No timer interval to clear during pause');
         }
         
-        // Update ref immediately for consistency
+        // Update refs immediately for consistency
         isTimerPausedRef.current = true;
+        isPausedRef.current = true;
         
-        // Store the current elapsed time at pause moment - DON'T modify it
-        console.log('🔴 Freezing elapsed time at:', elapsed);
+        // Store the current elapsed time at pause moment and SYNC state with ref
+        const currentRefTime = actualElapsedRef.current;
+        console.log('🔴 Freezing elapsed time at:', elapsed, 'totalWorkingTime:', totalWorkingTime, 'syncing from ref:', currentRefTime);
         
         // Use unstable_batchedUpdates to ensure all state changes happen together
         unstable_batchedUpdates(() => {
-            // Keep elapsed time as-is - don't modify it during pause
+            // IMPORTANT: Sync state with ref to preserve the actual working time
+            setTotalWorkingTime(currentRefTime);
+            setElapsed(currentRefTime);
+            // Set paused state - working time is now synchronized
+            setIsPaused(true);
             setIsTimerPaused(true);
             setTimerStatus('idle');
             setPauseStartTime(Date.now());
             setShowIdleNotification(true);
-            console.log('🔴 BATCHED STATE UPDATE COMPLETED');
+            console.log('🔴 BATCHED STATE UPDATE COMPLETED - timer paused at synced time:', currentRefTime, '(was state: elapsed:', elapsed, 'totalWorkingTime:', totalWorkingTime, ')');
         });
         
         console.log('🔴 PAUSE STATE SET - isTimerPaused should now be true');
@@ -1281,7 +1335,7 @@ export default function TimeTrackerPage() {
         isUpdatingStateRef.current = false;
     };
 
-    const handleTimerResume = () => {
+    const handleTimerResume = (electronIdleTime: number = 0) => {
         // Use persistent cache reference to avoid React re-mount issues
         const currentEntry = persistentCacheRef.current || cachedActiveEntry;
         if (!currentEntry) {
@@ -1295,35 +1349,68 @@ export default function TimeTrackerPage() {
             return;
         }
         
-        console.log('🟢 Electron active detection - proceeding with resume');
+        // Use Electron's idle time (more reliable than pauseStartTime calculation)
+        let idleDuration = 0;
+        if (electronIdleTime > 0) {
+            idleDuration = Math.floor(electronIdleTime / 1000); // Convert ms to seconds
+            console.log('🟢 Using Electron idle time:', idleDuration, 'seconds');
+        } else if (pauseStartTime) {
+            idleDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
+            console.log('🟢 Using pauseStartTime calculation:', idleDuration, 'seconds');
+        }
+        
+        // IMPORTANT: Require at least 5 seconds of idle time ONLY if we have a measured idle time
+        // If idleDuration is 0 (no measurement), allow resume (probably manual resume)
+        if (idleDuration > 0 && idleDuration < 5) {
+            console.log('🟢 Ignoring resume - idle duration too short:', idleDuration, 'seconds (minimum 5 seconds required)');
+            return;
+        }
+        console.log('🟢 Proceeding with resume - idleDuration:', idleDuration, 'seconds');
         
         isUpdatingStateRef.current = true;
         
         console.log('🟢 Resuming timer after activity');
         
-        // Calculate and add the inactive period to accumulated time BEFORE resuming
-        if (pauseStartTime) {
-            const inactiveDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
-            if (inactiveDuration > 0) {
-                setAccumulatedTime(prev => {
-                    const newTotal = prev + inactiveDuration;
-                    console.log('🟢 Added inactive duration to accumulated time:', inactiveDuration, 'prev:', prev, 'newTotal:', newTotal);
-                    return newTotal;
-                });
-            }
+        // Force clear any existing timer intervals before creating new ones
+        if (timerIntervalRef.current) {
+            console.log('🟢 Clearing existing timer interval during resume');
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
         }
         
-        // Update ref immediately for consistency
+        // Calculate idle duration but DO NOT add it to working time (skip inactive time completely)
+        if (pauseStartTime && electronIdleTime === 0) {
+            idleDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
+            console.log('🟢 User was idle for:', idleDuration, 'seconds - this time will be SKIPPED completely');
+        }
+        
+        // Update refs immediately for consistency
         isTimerPausedRef.current = false;
+        isPausedRef.current = false;
         
         // Use unstable_batchedUpdates to ensure all state changes happen together
         unstable_batchedUpdates(() => {
+            // Use ref value and CONTINUE from exact same time (skip idle period completely)
+            const refWorkingTime = actualElapsedRef.current;
+            const newTotalWorkingTime = refWorkingTime; // NO idle time added
+            const newElapsed = refWorkingTime; // NO idle time added
+            
+            console.log('🟢 Resume using ref time - refWorkingTime:', refWorkingTime, 'state totalWorkingTime:', totalWorkingTime, 'idleDuration SKIPPED:', idleDuration);
+            
+
+            
+            // Update both state and ref to keep them in sync
+            setTotalWorkingTime(newTotalWorkingTime);
+            setElapsed(newElapsed);
+            actualElapsedRef.current = newTotalWorkingTime; // Update ref to match
+            
+            setIsPaused(false);
             setIsTimerPaused(false);
             setTimerStatus('running'); // Reset timer status to running
             setShowIdleNotification(false);
             setPauseStartTime(null);
             setIdleStartTime(null); // Also clear idle start time
-            console.log('🟢 BATCHED RESUME UPDATE COMPLETED');
+            console.log('🟢 BATCHED RESUME UPDATE COMPLETED - timer continued from ref:', refWorkingTime, 'to', newTotalWorkingTime, 'seconds (skipped', idleDuration, 'idle seconds completely)');
         });
         
         // Small delay to ensure all state updates are processed before timer restarts

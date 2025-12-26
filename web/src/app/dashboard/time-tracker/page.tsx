@@ -348,23 +348,59 @@ export default function TimeTrackerPage() {
         }
     });
     const [stopTimer] = useMutation(STOP_TIME_ENTRY, {
-        onCompleted: () => {
+        onCompleted: (data) => {
+            console.log('✅ TIMER STOP SUCCESS - Response data:', data);
             console.log('⛔ Timer stopped automatically! (This should only appear when user manually stops timer)');
             console.log('🗑️ Clearing cached entry due to manual timer stop');
             setCachedActiveEntry(null); // Clear cached entry
             refetchActiveEntry();
             refetchTimeEntries();
+            refetchTodaySessions(); // Also refresh today sessions
             setIsStopping(false); // Reset stopping flag after successful stop
         },
         update: (cache) => {
+            console.log('🔄 UPDATING CACHE AFTER STOP');
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'activeTimeEntry' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'timeEntries' });
             cache.evict({ id: 'ROOT_QUERY', fieldName: 'todayTimesheet' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'todaySessions' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'timesheets' });
+            // Also clear any week/month specific data
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'weekTimesheets' });
+            cache.evict({ id: 'ROOT_QUERY', fieldName: 'monthTimesheets' });
         },
         onError: (error) => {
-            console.error('Error stopping timer:', error);
+            console.error('❌ TIMER STOP ERROR:', error);
+            console.error('❌ ERROR GRAPHQL ERRORS:', error.graphQLErrors);
+            console.error('❌ ERROR NETWORK ERROR:', error.networkError);
+            console.error('❌ ERROR MESSAGE:', error.message);
+            
             setIsStopping(false); // Reset stopping flag on error
-            alert('Failed to stop timer. Please check if the backend is running.');
+            
+            // Provide more specific error messages
+            if (error.message.includes('No active timer found') || 
+                error.graphQLErrors?.some((gqlError: any) => gqlError.message?.includes('No active timer found'))) {
+                console.log('❌ DETECTED "No active timer found" error');
+                // This is not really an error - the timer was already stopped
+                // Just refresh the UI to reflect the correct state
+                refetchActiveEntry();
+                refetchTimeEntries();
+                refetchTodaySessions();
+                setCachedActiveEntry(null);
+                // Only show alert if it's unexpected (i.e., we thought there was an active timer)
+                const currentActiveEntry = activeEntry || persistentCacheRef.current || cachedActiveEntry;
+                if (currentActiveEntry) {
+                    console.log('⚠️ UI thought there was an active timer, but backend says none');
+                    // Don't show alarming error message, just refresh silently
+                    console.log('🔄 Silently refreshing UI state to match backend');
+                }
+            } else if (error.message.includes('Network error') || error.networkError) {
+                console.log('❌ DETECTED Network error');
+                alert('Network error: Failed to stop timer. Please check your connection.');
+            } else {
+                console.log('❌ OTHER ERROR TYPE');
+                alert(`Failed to stop timer: ${error.message}`);
+            }
         }
     });
 
@@ -648,12 +684,12 @@ export default function TimeTrackerPage() {
                 console.log('🔄 Same timer entry detected, preserving pause state');
             }
         } else {
-            // Reset when no active entry
-            console.log('🚫 No active entry, resetting all state');
+            // Reset when no active entry, but don't interfere with ongoing stop process
+            console.log('🚫 No active entry, resetting timer state (preserving isStopping flag)');
             setAccumulatedTime(0);
             setPauseStartTime(null);
             setIsTimerPaused(false);
-            setIsStopping(false);
+            // Don't reset isStopping here - let the stop mutation handlers manage it
         }
     }, [activeEntry?.id]); // Only re-run when active entry ID changes
 
@@ -1226,14 +1262,12 @@ export default function TimeTrackerPage() {
         // Update ref immediately for consistency
         isTimerPausedRef.current = true;
         
-        // Adjust elapsed time to add 60 seconds of active time
-        // The user was active for 60 seconds before going idle
-        const adjustedElapsed = elapsed + 60;
-        console.log('🔴 Adjusting elapsed time from', elapsed, 'to', adjustedElapsed, '(adding 60s active time)');
+        // Store the current elapsed time at pause moment - DON'T modify it
+        console.log('🔴 Freezing elapsed time at:', elapsed);
         
         // Use unstable_batchedUpdates to ensure all state changes happen together
         unstable_batchedUpdates(() => {
-            setElapsed(adjustedElapsed);
+            // Keep elapsed time as-is - don't modify it during pause
             setIsTimerPaused(true);
             setTimerStatus('idle');
             setPauseStartTime(Date.now());
@@ -1267,19 +1301,7 @@ export default function TimeTrackerPage() {
         
         console.log('🟢 Resuming timer after activity');
         
-        // Update ref immediately for consistency
-        isTimerPausedRef.current = false;
-        
-        // Use unstable_batchedUpdates to ensure all state changes happen together
-        unstable_batchedUpdates(() => {
-            setIsTimerPaused(false);
-            setTimerStatus('running'); // Reset timer status to running
-            setShowIdleNotification(false);
-            // Don't manually set elapsed time - let the timer effect handle it naturally
-            console.log('🟢 BATCHED RESUME UPDATE COMPLETED');
-        });
-        
-        // Calculate and add the inactive period
+        // Calculate and add the inactive period to accumulated time BEFORE resuming
         if (pauseStartTime) {
             const inactiveDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
             if (inactiveDuration > 0) {
@@ -1290,8 +1312,19 @@ export default function TimeTrackerPage() {
                 });
             }
         }
-        setPauseStartTime(null);
-        setIdleStartTime(null); // Also clear idle start time
+        
+        // Update ref immediately for consistency
+        isTimerPausedRef.current = false;
+        
+        // Use unstable_batchedUpdates to ensure all state changes happen together
+        unstable_batchedUpdates(() => {
+            setIsTimerPaused(false);
+            setTimerStatus('running'); // Reset timer status to running
+            setShowIdleNotification(false);
+            setPauseStartTime(null);
+            setIdleStartTime(null); // Also clear idle start time
+            console.log('🟢 BATCHED RESUME UPDATE COMPLETED');
+        });
         
         // Small delay to ensure all state updates are processed before timer restarts
         setTimeout(() => {
@@ -1622,17 +1655,83 @@ export default function TimeTrackerPage() {
                                                 )}
                                             </div>
                                             <button
-                                                onClick={() => {
+                                                onClick={async () => {
                                                     if (!stopTimer) {
                                                         alert('Timer functionality is not available. Please check if the backend is running.');
                                                         return;
                                                     }
-                                                    stopTimer();
+                                                    
+                                                    // Debug: Log current state
+                                                    console.log('🛑 STOP BUTTON CLICKED - Current state:', {
+                                                        activeEntry: !!activeEntry,
+                                                        activeEntryId: activeEntry?.id,
+                                                        cachedActiveEntry: !!cachedActiveEntry,
+                                                        cachedEntryId: cachedActiveEntry?.id,
+                                                        persistentCacheRef: !!persistentCacheRef.current,
+                                                        persistentCacheId: persistentCacheRef.current?.id,
+                                                        isTimerPaused,
+                                                        timerStatus
+                                                    });
+                                                    
+                                                    // Check if there's actually an active timer before trying to stop it
+                                                    const currentActiveEntry = activeEntry || persistentCacheRef.current || cachedActiveEntry;
+                                                    if (!currentActiveEntry) {
+                                                        console.log('🛑 STOP FAILED - No active entry found');
+                                                        alert('No active timer found to stop.');
+                                                        return;
+                                                    }
+                                                    
+                                                    console.log('🛑 PROCEEDING TO STOP TIMER - Entry ID:', currentActiveEntry.id);
+                                                    
+                                                    // Set stopping flag to prevent duplicate calls
+                                                    setIsStopping(true);
+                                                    
+                                                    try {
+                                                        // First, refresh the active entry to make sure we have the latest state
+                                                        console.log('🔄 REFRESHING ACTIVE ENTRY BEFORE STOP');
+                                                        const result = await refetchActiveEntry();
+                                                        console.log('🔄 REFRESH RESULT:', result.data?.activeTimeEntry);
+                                                        
+                                                        // Check if there's still an active timer after refresh
+                                                        if (!result.data?.activeTimeEntry) {
+                                                            console.log('🛑 NO ACTIVE TIMER ON BACKEND AFTER REFRESH');
+                                                            
+                                                            // If we had an active timer in UI, try to stop anyway in case of race condition
+                                                            if (currentActiveEntry) {
+                                                                console.log('⚠️ RACE CONDITION DETECTED - UI had timer but backend shows none. Trying to stop anyway...');
+                                                                try {
+                                                                    await stopTimer();
+                                                                    return;
+                                                                } catch (stopError) {
+                                                                    console.log('⚠️ Stop attempt failed, timer was already stopped');
+                                                                }
+                                                            }
+                                                            
+                                                            // If we reach here, the timer was genuinely already stopped
+                                                            console.log('✅ Timer was already stopped, just refreshing UI');
+                                                            setCachedActiveEntry(null);
+                                                            // Refresh all queries to ensure timesheet is updated
+                                                            refetchActiveEntry();
+                                                            refetchTimeEntries();
+                                                            refetchTodaySessions();
+                                                            setIsStopping(false);
+                                                            return;
+                                                        }
+                                                        
+                                                        // If there's still an active timer, proceed with stop
+                                                        console.log('🛑 STOPPING TIMER - BACKEND CONFIRMS ACTIVE TIMER');
+                                                        stopTimer();
+                                                    } catch (error) {
+                                                        console.error('❌ ERROR DURING PRE-STOP REFRESH:', error);
+                                                        setIsStopping(false);
+                                                        alert('Failed to verify timer status. Please try again.');
+                                                    }
                                                 }}
-                                                className="w-full inline-flex items-center justify-center px-6 py-3 bg-red-600 hover:bg-red-700 text-white rounded-lg transition-colors"
+                                                disabled={isStopping}
+                                                className="w-full inline-flex items-center justify-center px-6 py-3 bg-red-600 hover:bg-red-700 disabled:bg-gray-400 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
                                             >
                                                 <StopIcon className="h-5 w-5 mr-2" />
-                                                Stop Timer
+                                                {isStopping ? 'Stopping...' : 'Stop Timer'}
                                             </button>
                                         </div>
                                     ) : (

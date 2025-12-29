@@ -322,6 +322,17 @@ export default function TimeTrackerPage() {
     const [startTimer] = useMutation(START_TIME_ENTRY, {
         onCompleted: async () => {
             console.log('✅ Timer started successfully!');
+            
+            // Show system notification for timer start
+            try {
+                await browserElectronService.showNotification(
+                    'Timer Started',
+                    'Your timer has been started successfully'
+                );
+            } catch (error) {
+                console.error('Failed to show start notification:', error);
+            }
+            
             // Add delay before refetch to let backend process
             setTimeout(async () => {
                 console.log('🔄 Refetching immediately after timer start...');
@@ -356,6 +367,19 @@ export default function TimeTrackerPage() {
             console.log('✅ TIMER STOP SUCCESS - Response data:', data);
             console.log('⛔ Timer stopped automatically! (This should only appear when user manually stops timer)');
             console.log('🗑️ Clearing cached entry due to manual timer stop');
+            
+            // Show system notification for timer stop
+            try {
+                browserElectronService.showNotification(
+                    'Timer Stopped',
+                    `Your timer has been stopped at ${formatTime(totalWorkingTime)}`
+                ).catch(error => {
+                    console.error('Failed to show stop notification:', error);
+                });
+            } catch (error) {
+                console.error('Failed to show stop notification:', error);
+            }
+            
             setCachedActiveEntry(null); // Clear cached entry
             refetchActiveEntry();
             refetchTimeEntries();
@@ -1323,6 +1347,18 @@ export default function TimeTrackerPage() {
         
         isUpdatingStateRef.current = true;
         
+        // Show system notification for timer pause
+          try {
+                browserElectronService.showNotification(
+                    'Timer Paused',
+                    `Your timer has been paused at ${formatTime(totalWorkingTime)}`
+                ).catch(error => {
+                    console.error('Failed to show pause notification:', error);
+                });
+            } catch (error) {
+                console.error('Failed to show pause notification:', error);
+            }
+        
         console.log('🔴 Pausing timer due to inactivity. cachedEntry:', currentEntry);
         console.log('🔴 Timer entry details:', {
             id: currentEntry.id,
@@ -1442,6 +1478,18 @@ export default function TimeTrackerPage() {
             setShowIdleNotification(false);
             pauseStartTimeRef.current = null;
             setIdleStartTime(null); // Also clear idle start time
+            
+            // Show system notification for timer resume
+              try {
+                browserElectronService.showNotification(
+                    'Timer Resumed',
+                    `Your timer has been resumed at ${formatTime(actualWorkTime)}`
+                ).catch(error => {
+                    console.error('Failed to show resume notification:', error);
+                });
+            } catch (error) {
+                console.error('Failed to show resume notification:', error);
+            }
             
             // Force timer to restart with corrected base time (excluding idle time)
             // Add small delay to ensure state updates complete before timer restart

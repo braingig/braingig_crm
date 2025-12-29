@@ -9,6 +9,7 @@ interface BrowserElectronAPI {
     isIdle: boolean;
   }>;
   onActivityStatus: (callback: (data: any) => void) => () => void;
+  showNotification: (title: string, body: string, icon?: string) => Promise<{ success: boolean }>;
 }
 
 class BrowserElectronService {
@@ -231,6 +232,58 @@ class BrowserElectronService {
     await this.checkAvailability();
     console.log('🔄 Force check result:', this.isAvailable);
     return this.isAvailable;
+  }
+
+  async showNotification(title: string, body: string, icon?: string): Promise<{ success: boolean }> {
+    if (!this.isAvailable) {
+      console.warn('Electron service not available, falling back to browser notification');
+      // Fallback to browser notification if Electron service is not available
+      if (Notification.permission === 'granted') {
+        new Notification(title, { body, icon });
+        return { success: true };
+      } else if (Notification.permission !== 'denied') {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          new Notification(title, { body, icon });
+          return { success: true };
+        }
+      }
+      return { success: false };
+    }
+
+    try {
+      const response = await fetch(`${this.ELECTRON_URL}/show-notification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title, body, icon }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('System notification sent:', result);
+      return result;
+    } catch (error) {
+      console.error('Failed to send system notification:', error instanceof Error ? error.message : String(error));
+      
+      // Fallback to browser notification
+      if (Notification.permission === 'granted') {
+        new Notification(title, { body, icon });
+        return { success: true };
+      } else if (Notification.permission !== 'denied') {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          new Notification(title, { body, icon });
+          return { success: true };
+        }
+      }
+      
+      return { success: false };
+    }
   }
 }
 

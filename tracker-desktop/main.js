@@ -1,4 +1,4 @@
-const { app, BrowserWindow, powerMonitor, ipcMain } = require('electron');
+const { app, BrowserWindow, powerMonitor, ipcMain, Notification } = require('electron');
 const path = require('path');
 const fetch = require('node-fetch');
 const Store = require('electron-store');
@@ -39,6 +39,36 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+// Function to show system notifications
+function showSystemNotification(title, body, icon = null) {
+  if (!Notification.isSupported()) {
+    console.log('System notifications not supported');
+    return false;
+  }
+
+  const notification = new Notification({
+    title: title,
+    body: body,
+    icon: icon || null,
+    silent: false,
+    urgency: 'normal',
+    timeoutType: 'default'
+  });
+
+  notification.on('click', () => {
+    console.log('Notification clicked');
+    // Focus the window when notification is clicked
+    if (mainWindow) {
+      mainWindow.show();
+      mainWindow.focus();
+    }
+  });
+
+  notification.show();
+  console.log(`System notification shown: ${title} - ${body}`);
+  return true;
 }
 
 // Create HTTP server for browser communication
@@ -111,6 +141,20 @@ function createHttpServer() {
         const index = browserSSEClients.indexOf(res);
         if (index > -1) {
           browserSSEClients.splice(index, 1);
+        }
+      });
+    } else if (path === '/show-notification' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', () => {
+        try {
+          const data = JSON.parse(body);
+          showSystemNotification(data.title, data.body, data.icon);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: true }));
+        } catch (error) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: error.message }));
         }
       });
     } else {

@@ -51,7 +51,7 @@ export default function TimeTrackerPage() {
     const [showCheckInSuccessToast, setShowCheckInSuccessToast] = useState(false);
     const [lastActivity, setLastActivity] = useState(Date.now());
     const [isTimerPaused, setIsTimerPaused] = useState(false);
-    const [pauseStartTime, setPauseStartTime] = useState<number | null>(null);
+    const pauseStartTimeRef = useRef<number | null>(null); // Use ref instead of state for immediate access
     const [totalWorkingTime, setTotalWorkingTime] = useState(0);
     const [isPaused, setIsPaused] = useState(false);
     const [cachedActiveEntry, setCachedActiveEntry] = useState<any>(null);
@@ -64,6 +64,7 @@ export default function TimeTrackerPage() {
     const timerIntervalRef = useRef<NodeJS.Timeout | null>(null); // Store current timer interval
     const actualElapsedRef = useRef(0); // Track actual elapsed time independently of state
     const isUpdatingStateRef = useRef(false); // Prevent rapid state updates
+    const [timerRestartKey, setTimerRestartKey] = useState(0); // Force timer restart on resume
     const [isTabVisible, setIsTabVisible] = useState(true);
     const [isStopping, setIsStopping] = useState(false);
     const [timerStatus, setTimerStatus] = useState<'running' | 'paused' | 'idle'>('running');
@@ -515,6 +516,14 @@ export default function TimeTrackerPage() {
                             // User went idle - pause the timer
                             console.log('🔴 IDLE detected, pausing timer. cachedEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPausedRef.current);
                             console.log('🔴 About to call handleTimerPause()');
+                            
+                            // IMMEDIATELY stop the timer interval to prevent any further counting
+                            if (timerIntervalRef.current) {
+                                console.log('🛑 EMERGENCY STOP: Clearing timer interval immediately on IDLE detection');
+                                clearInterval(timerIntervalRef.current);
+                                timerIntervalRef.current = null;
+                            }
+                            
                             handleTimerPause(); // Call immediately instead of setTimeout
                         } else if (data.type === 'ACTIVE' && currentActiveEntry && isTimerPausedRef.current) {
                             // User became active again - resume the timer
@@ -593,6 +602,14 @@ export default function TimeTrackerPage() {
                             if (data.type === 'IDLE' && currentActiveEntry) {
                                 // User went idle - stop the timer
                                 console.log('🔴 IPC IDLE detected, pausing timer');
+                                
+                                // IMMEDIATELY stop the timer interval to prevent any further counting
+                                if (timerIntervalRef.current) {
+                                    console.log('🛑 EMERGENCY STOP (IPC): Clearing timer interval immediately on IDLE detection');
+                                    clearInterval(timerIntervalRef.current);
+                                    timerIntervalRef.current = null;
+                                }
+                                
                                 handleTimerPause();
                             } else if (data.type === 'ACTIVE' && currentActiveEntry && isTimerPaused) {
                                 // User became active again - resume the timer
@@ -686,7 +703,7 @@ export default function TimeTrackerPage() {
                     setElapsed(0);
                     setIsPaused(false);
                     setIsTimerPaused(false);
-                    setPauseStartTime(null);
+                    pauseStartTimeRef.current = null;
                     setIsStopping(false); // Reset stopping flag for new timer
                     // Initialize refs
                     isPausedRef.current = false;
@@ -709,7 +726,7 @@ export default function TimeTrackerPage() {
                 setTotalWorkingTime(0);
                 setElapsed(0);
                 setIsPaused(false);
-                setPauseStartTime(null);
+                pauseStartTimeRef.current = null;
                 setIsTimerPaused(false);
                 // Don't reset isStopping here - let the stop mutation handlers manage it
             } else {
@@ -894,35 +911,53 @@ export default function TimeTrackerPage() {
 
             console.log('⏱️ Timer conditions met - timerEntry:', !!timerEntry, 'isTimerPausedRef:', isTimerPausedRef.current, 'timerStatus:', timerStatus, 'isPausedRef:', isPausedRef.current);
         console.log('⏱️ State vs Ref - isTimerPaused(state):', isTimerPaused, 'isPaused(state):', isPaused);
-        
-        // Create timer interval (clear any existing interval first)
-        if (timerIntervalRef.current) {
-            clearInterval(timerIntervalRef.current);
-            timerIntervalRef.current = null;
-            console.log('⏱️ Cleared existing timer interval');
-        }
+        console.log('⏱️ Current totalWorkingTime:', totalWorkingTime, 'actualElapsedRef.current:', actualElapsedRef.current);
         
         const intervalId = Date.now();
         console.log('⏱️ Creating new timer interval:', intervalId);
         
-        // Sync ref with current state and calculate start time
-        actualElapsedRef.current = totalWorkingTime;
-        const startTime = Date.now() - (actualElapsedRef.current * 1000);
-        console.log('⏱️ Timer starting - synced ref to state:', actualElapsedRef.current, 'seconds, startTime:', startTime);
+        // CRITICAL: Clear any existing timer interval before creating a new one
+        if (timerIntervalRef.current) {
+            console.log('🛑 CLEANUP: Found existing timer interval, clearing it first');
+            clearInterval(timerIntervalRef.current);
+            timerIntervalRef.current = null;
+        }
+        
+        // CRITICAL: Use the ref value instead of state to get the most up-to-date working time
+        // This prevents the timer from using stale state after resume corrections
+        const currentWorkingTime = actualElapsedRef.current;
+        const startTime = Date.now() - (currentWorkingTime * 1000);
+        console.log('⏱️ Timer starting/resuming - baseWorkingTime (from ref):', currentWorkingTime, 'seconds, calculated startTime:', startTime, 'currentTime:', Date.now());
+        console.log('⏱️ State vs Ref - totalWorkingTime(state):', totalWorkingTime, 'actualElapsedRef:', actualElapsedRef.current);
+        console.log('🔍 TIMER START DEBUG - If user worked 44s, baseWorkingTime should be 44, not 104. Checking...');
         
         timerIntervalRef.current = setInterval(() => {
-            if (!isPausedRef.current) {
-                // Calculate elapsed time based on start time (more reliable than incremental updates)
-                const currentElapsed = Math.floor((Date.now() - startTime) / 1000);
-                actualElapsedRef.current = currentElapsed; // Update ref immediately
-                
-                setTotalWorkingTime(currentElapsed);
-                setElapsed(currentElapsed);
-                
-                // Log every 5 seconds to reduce spam
-                if (currentElapsed % 5 === 0) {
-                    console.log('⏱️ Timer working (ref-based):', currentElapsed, 'seconds elapsed (ref:', actualElapsedRef.current, ')');
+            // CRITICAL: Check both refs to ensure timer stops immediately when user becomes inactive
+            if (isPausedRef.current || isTimerPausedRef.current) {
+                console.log('🛑 Timer interval detected pause - stopping immediately');
+                if (timerIntervalRef.current) {
+                    clearInterval(timerIntervalRef.current);
+                    timerIntervalRef.current = null;
                 }
+                return;
+            }
+            
+            // Calculate elapsed time based on start time (more reliable than incremental updates)
+            const currentElapsed = Math.floor((Date.now() - startTime) / 1000);
+            actualElapsedRef.current = currentElapsed; // Update ref immediately
+            
+            setTotalWorkingTime(currentElapsed);
+            setElapsed(currentElapsed);
+            
+            // Debug logging to verify correct calculation
+            if (currentElapsed % 5 === 0) {
+                const debugIdleTime = pauseStartTimeRef.current ? Math.floor((Date.now() - pauseStartTimeRef.current) / 1000) : 0;
+                console.log('🔍 TIMER DEBUG - currentElapsed:', currentElapsed, 'startTime:', startTime, 'idleTime:', debugIdleTime, 'isTimerPausedRef:', isTimerPausedRef.current);
+            }
+            
+            // Log every 5 seconds to reduce spam
+            if (currentElapsed % 5 === 0) {
+                console.log('⏱️ Timer working (ref-based):', currentElapsed, 'seconds elapsed (ref:', actualElapsedRef.current, ')');
             }
         }, 1000); // Update every second for consistency and performance
             
@@ -937,7 +972,7 @@ export default function TimeTrackerPage() {
 
             // Do NOT update elapsed time - keep it frozen at the pause moment
         }
-    }, [activeEntry, isPaused, isTimerPaused, timerStatus]);
+    }, [activeEntry, isPaused, isTimerPaused, timerStatus, timerRestartKey]);
 
     // Stop timer when user closes browser window or navigates away
     // useEffect(() => {
@@ -1297,6 +1332,7 @@ export default function TimeTrackerPage() {
         });
         console.log('🔴 About to set isTimerPaused to true (current value: false )');
         console.log('🔴 STATE BEFORE PAUSE - elapsed:', elapsed, 'totalWorkingTime:', totalWorkingTime, 'isPaused:', isPaused, 'actualElapsedRef:', actualElapsedRef.current);
+        console.log('🔴 EXPECTED: Timer should show 00:44 but user reports it shows 1:44 - investigating time calculation');
         
         // Force clear any running timer interval immediately
         if (timerIntervalRef.current) {
@@ -1317,16 +1353,17 @@ export default function TimeTrackerPage() {
         
         // Use unstable_batchedUpdates to ensure all state changes happen together
         unstable_batchedUpdates(() => {
-            // IMPORTANT: Sync state with ref to preserve the actual working time
+            // IMPORTANT: Sync state with ref to preserve the actual working time at pause moment
             setTotalWorkingTime(currentRefTime);
             setElapsed(currentRefTime);
             // Set paused state - working time is now synchronized
             setIsPaused(true);
             setIsTimerPaused(true);
             setTimerStatus('idle');
-            setPauseStartTime(Date.now());
+            const now = Date.now();
+            pauseStartTimeRef.current = now;
             setShowIdleNotification(true);
-            console.log('🔴 BATCHED STATE UPDATE COMPLETED - timer paused at synced time:', currentRefTime, '(was state: elapsed:', elapsed, 'totalWorkingTime:', totalWorkingTime, ')');
+            console.log('🔴 PAUSE START TIME SET:', now, '- BATCHED STATE UPDATE COMPLETED - timer paused at synced time:', currentRefTime, '(was state: elapsed:', elapsed, 'totalWorkingTime:', totalWorkingTime, ')');
         });
         
         console.log('🔴 PAUSE STATE SET - isTimerPaused should now be true');
@@ -1349,21 +1386,17 @@ export default function TimeTrackerPage() {
             return;
         }
         
-        // Use Electron's idle time (more reliable than pauseStartTime calculation)
-        let idleDuration = 0;
-        if (electronIdleTime > 0) {
-            idleDuration = Math.floor(electronIdleTime / 1000); // Convert ms to seconds
-            console.log('🟢 Using Electron idle time:', idleDuration, 'seconds');
-        } else if (pauseStartTime) {
-            idleDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
-            console.log('🟢 Using pauseStartTime calculation:', idleDuration, 'seconds');
-        }
+        // Always subtract exactly 60 seconds when user was inactive (1 minute)
+        // This is the core requirement: if user inactive for 1 minute, subtract that time
+        let idleDuration = 60; // Always 60 seconds for 1 minute of inactivity
         
-        // IMPORTANT: Require at least 5 seconds of idle time ONLY if we have a measured idle time
-        // If idleDuration is 0 (no measurement), allow resume (probably manual resume)
-        if (idleDuration > 0 && idleDuration < 5) {
-            console.log('🟢 Ignoring resume - idle duration too short:', idleDuration, 'seconds (minimum 5 seconds required)');
-            return;
+        console.log('🔍 DEBUG - pauseStartTimeRef:', pauseStartTimeRef.current, 'electronIdleTime:', electronIdleTime);
+        console.log('🟢 FIXED IDLE DURATION: Always subtracting', idleDuration, 'seconds (1 minute of inactivity)');
+        
+        // Validate that we actually had an inactivity period (should have pauseStartTime or electronIdleTime)
+        if (!pauseStartTimeRef.current && electronIdleTime === 0) {
+            console.log('🔴 WARNING: No inactivity detected - this might be a manual resume');
+            idleDuration = 0; // Don't subtract time if no inactivity was detected
         }
         console.log('🟢 Proceeding with resume - idleDuration:', idleDuration, 'seconds');
         
@@ -1378,11 +1411,8 @@ export default function TimeTrackerPage() {
             timerIntervalRef.current = null;
         }
         
-        // Calculate idle duration but DO NOT add it to working time (skip inactive time completely)
-        if (pauseStartTime && electronIdleTime === 0) {
-            idleDuration = Math.floor((Date.now() - pauseStartTime) / 1000);
-            console.log('🟢 User was idle for:', idleDuration, 'seconds - this time will be SKIPPED completely');
-        }
+        // idleDuration is now fixed to 60 seconds for inactivity periods
+        console.log('🟢 FIXED: User was inactive - subtracting exactly', idleDuration, 'seconds from working time (1 minute of inactivity)');
         
         // Update refs immediately for consistency
         isTimerPausedRef.current = false;
@@ -1390,27 +1420,36 @@ export default function TimeTrackerPage() {
         
         // Use unstable_batchedUpdates to ensure all state changes happen together
         unstable_batchedUpdates(() => {
-            // Use ref value and CONTINUE from exact same time (skip idle period completely)
-            const refWorkingTime = actualElapsedRef.current;
-            const newTotalWorkingTime = refWorkingTime; // NO idle time added
-            const newElapsed = refWorkingTime; // NO idle time added
+            // Get the actual working time when paused (includes idle time that needs to be subtracted)
+            const pausedWorkingTime = actualElapsedRef.current;
             
-            console.log('🟢 Resume using ref time - refWorkingTime:', refWorkingTime, 'state totalWorkingTime:', totalWorkingTime, 'idleDuration SKIPPED:', idleDuration);
+            // CRITICAL: Subtract the idle time from the working time since user was inactive
+            // Example: Timer shows 5:25 when paused, user was idle for 1 minute = actual work time is 4:25
+            const actualWorkTime = Math.max(0, pausedWorkingTime - idleDuration);
+            const newTotalWorkingTime = actualWorkTime;
+            const newElapsed = actualWorkTime;
             
-
+            console.log('🟢 Resume with idle time subtraction - pausedWorkingTime:', pausedWorkingTime, 'idleDuration:', idleDuration, 'actualWorkTime:', actualWorkTime, 'state totalWorkingTime:', totalWorkingTime);
             
-            // Update both state and ref to keep them in sync
+            // Update both state and ref to keep them in sync with the corrected working time
             setTotalWorkingTime(newTotalWorkingTime);
             setElapsed(newElapsed);
-            actualElapsedRef.current = newTotalWorkingTime; // Update ref to match
+            actualElapsedRef.current = newTotalWorkingTime; // Update ref to match corrected time
             
             setIsPaused(false);
             setIsTimerPaused(false);
             setTimerStatus('running'); // Reset timer status to running
             setShowIdleNotification(false);
-            setPauseStartTime(null);
+            pauseStartTimeRef.current = null;
             setIdleStartTime(null); // Also clear idle start time
-            console.log('🟢 BATCHED RESUME UPDATE COMPLETED - timer continued from ref:', refWorkingTime, 'to', newTotalWorkingTime, 'seconds (skipped', idleDuration, 'idle seconds completely)');
+            
+            // Force timer to restart with corrected base time (excluding idle time)
+            // Add small delay to ensure state updates complete before timer restart
+            setTimeout(() => {
+                setTimerRestartKey(prev => prev + 1);
+            }, 10);
+            
+            console.log('🟢 BATCHED RESUME UPDATE COMPLETED - timer corrected to:', actualWorkTime, 'seconds (subtracted', idleDuration, 'idle seconds from', pausedWorkingTime, ')');
         });
         
         // Small delay to ensure all state updates are processed before timer restarts

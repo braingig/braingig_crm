@@ -10,6 +10,15 @@ interface BrowserElectronAPI {
   }>;
   onActivityStatus: (callback: (data: any) => void) => () => void;
   showNotification: (title: string, body: string, icon?: string) => Promise<{ success: boolean }>;
+  captureScreenshot: (consent: boolean) => Promise<{ 
+    success: boolean; 
+    filepath?: string; 
+    filename?: string; 
+    timestamp?: string; 
+    size?: number; 
+    error?: string;
+    data?: string;
+  }>;
 }
 
 class BrowserElectronService {
@@ -283,6 +292,47 @@ class BrowserElectronService {
       }
       
       return { success: false };
+    }
+  }
+
+  async captureScreenshot(consent: boolean): Promise<{ 
+    success: boolean; 
+    filepath?: string; 
+    filename?: string; 
+    timestamp?: string; 
+    size?: number; 
+    error?: string;
+    data?: string;
+  }> {
+    if (!this.isAvailable) {
+      console.warn('Electron service not available for screenshot capture');
+      return { success: false, error: 'Electron service not available' };
+    }
+
+    // Require explicit consent
+    if (!consent) {
+      return { success: false, error: 'Screenshot capture requires explicit consent' };
+    }
+
+    try {
+      const response = await fetch(`${this.ELECTRON_URL}/capture-screenshot`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ consent: true }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('Screenshot captured:', result);
+      return result;
+    } catch (error) {
+      console.error('Failed to capture screenshot:', error instanceof Error ? error.message : String(error));
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     }
   }
 }

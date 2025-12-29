@@ -26,12 +26,14 @@ import {
     ExclamationCircleIcon,
     InformationCircleIcon,
     ComputerDesktopIcon,
-    HomeIcon
+    HomeIcon,
+    CameraIcon
 } from '@heroicons/react/24/outline';
 
 export default function TimeTrackerPage() {
     // State management
     const [elapsed, setElapsed] = useState(0);
+    const [displayTime, setDisplayTime] = useState(0);
     const [selectedProject, setSelectedProject] = useState('');
     const [selectedTask, setSelectedTask] = useState('');
     const [taskDescription, setTaskDescription] = useState('');
@@ -77,6 +79,53 @@ export default function TimeTrackerPage() {
     const [isElectron, setIsElectron] = useState(false);
     const [electronTrackingEnabled, setElectronTrackingEnabled] = useState(false);
     const [activityStatus, setActivityStatus] = useState<any>(null);
+    const [notification, setNotification] = useState<{ message: string; type: 'success' | 'error' | 'warning' } | null>(null);
+
+    // Simple notification function
+    const showNotification = useCallback((message: string, type: 'success' | 'error' | 'warning' = 'success') => {
+        setNotification({ message, type });
+        // Auto-hide after 5 seconds (or 10 seconds for warnings)
+        setTimeout(() => {
+            setNotification(null);
+        }, type === 'warning' ? 10000 : 5000);
+    }, []);
+
+    // Screenshot management state
+    const [screenshotConsent, setScreenshotConsent] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const stored = localStorage.getItem('screenshotConsent') === 'true';
+            console.log('🔍 Initial screenshot consent from localStorage:', stored);
+            return stored;
+        }
+        return false;
+    });
+    const [screenshotSettings, setScreenshotSettings] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('screenshotSettings');
+            if (saved) {
+                try {
+                    const parsed = JSON.parse(saved);
+                    // Force update any settings less than 10 minutes to 10 minutes
+                    if (parsed.intervalMinutes < 10) {
+                        parsed.intervalMinutes = 10;
+                        // Save the corrected settings back to localStorage
+                        localStorage.setItem('screenshotSettings', JSON.stringify(parsed));
+                    }
+                    return parsed;
+                } catch (error) {
+                    console.error('Failed to parse screenshot settings:', error);
+                }
+            }
+        }
+        return {
+            enabled: false,
+            intervalMinutes: 10, // Capture screenshot every 10 minutes
+            randomOffsetMinutes: 1, // Random offset of ±1 minute
+            showNotification: true
+        };
+    });
+    const [lastScreenshotTime, setLastScreenshotTime] = useState<number | null>(null);
+    const [screenshotHistory, setScreenshotHistory] = useState<Array<{timestamp: number; data: string; filename: string}>>([]);
 
     // Apollo Client for cache management
     const client = useApolloClient();
@@ -331,6 +380,12 @@ export default function TimeTrackerPage() {
                 );
             } catch (error) {
                 console.error('Failed to show start notification:', error);
+            }
+            
+            // Set initial screenshot time when timer starts (to prevent immediate capture)
+            if (screenshotSettings.enabled && screenshotConsent) {
+                setLastScreenshotTime(Date.now());
+                console.log('📸 Initial screenshot time set to prevent immediate capture');
             }
             
             // Add delay before refetch to let backend process
@@ -696,6 +751,28 @@ export default function TimeTrackerPage() {
         }
     }, [timeEntriesError]);
 
+    // Effect to persist screenshot consent and settings
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('screenshotConsent', screenshotConsent.toString());
+        }
+    }, [screenshotConsent]);
+
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('screenshotSettings', JSON.stringify(screenshotSettings));
+        }
+    }, [screenshotSettings]);
+
+    // Sync display time with actual elapsed ref
+    useEffect(() => {
+        const interval = setInterval(() => {
+            setDisplayTime(actualElapsedRef.current);
+        }, 100); // Update every 100ms for smooth display
+
+        return () => clearInterval(interval);
+    }, []);
+
     useEffect(() => {
         if (projectsError) {
             console.error('Projects error:', projectsError);
@@ -983,6 +1060,36 @@ export default function TimeTrackerPage() {
             if (currentElapsed % 5 === 0) {
                 console.log('⏱️ Timer working (ref-based):', currentElapsed, 'seconds elapsed (ref:', actualElapsedRef.current, ')');
             }
+            
+            // Check for screenshot capture every second if enabled
+            if (currentElapsed % 10 === 0) {
+                console.log('📸 Screenshot status check - enabled:', screenshotSettings.enabled, 'consent:', screenshotConsent, 'lastScreenshotTime:', lastScreenshotTime);
+            }
+            
+            if (screenshotSettings.enabled && screenshotConsent) {
+                const now = Date.now();
+                const intervalMs = screenshotSettings.intervalMinutes * 60 * 1000;
+                const offsetMs = (Math.random() * 2 - 1) * screenshotSettings.randomOffsetMinutes * 60 * 1000;
+                const effectiveInterval = intervalMs + offsetMs;
+                const timeSinceLast = lastScreenshotTime ? now - lastScreenshotTime : 0;
+                
+                // Log every 10 seconds to show screenshot status
+                if (currentElapsed % 10 === 0) {
+                    console.log('📸 Screenshot check - enabled:', screenshotSettings.enabled, 'consent:', screenshotConsent, 'intervalMs:', intervalMs, 'timeSinceLast:', timeSinceLast, 'effectiveInterval:', effectiveInterval);
+                    console.log('📸 Screenshot panel visibility - screenshotConsent state:', screenshotConsent);
+                }
+                
+                // Only trigger if we have a lastScreenshotTime and enough time has passed
+                if (lastScreenshotTime && timeSinceLast >= effectiveInterval) {
+                    console.log('📸 Screenshot trigger - intervalMs:', intervalMs, 'effectiveInterval:', effectiveInterval, 'timeSinceLast:', timeSinceLast);
+                    captureScreenForTracking();
+                } else {
+                    // Log why we're not capturing (for debugging)
+                    if (currentElapsed % 30 === 0) { // Log every 30 seconds to reduce spam
+                        console.log('⏸️ Skipping screenshot - timeSinceLast:', Math.round(timeSinceLast / 1000), 's < effectiveInterval:', Math.round(effectiveInterval / 1000), 's');
+                    }
+                }
+            }
         }, 1000); // Update every second for consistency and performance
             
             return () => {
@@ -1115,6 +1222,61 @@ export default function TimeTrackerPage() {
             day: 'numeric',
             year: 'numeric'
         });
+    };
+
+    // Screenshot capture function with consent management
+    const captureScreenForTracking = async () => {
+        console.log('📸 captureScreenForTracking called - consent:', screenshotConsent, 'enabled:', screenshotSettings.enabled);
+        
+        if (!screenshotConsent) {
+            console.warn('Screenshot capture requires consent');
+            return false;
+        }
+
+        if (!screenshotSettings.enabled) {
+            console.warn('Screenshot capture not enabled');
+            return false;
+        }
+
+        try {
+            const result = await browserElectronService.captureScreenshot(true);
+            if (result.success && result.filename) {
+                const timestamp = Date.now();
+                setLastScreenshotTime(timestamp);
+                
+                // Add to screenshot history with base64 data
+                if (result.data && result.filename) {
+                    setScreenshotHistory(prev => [
+                        {
+                            timestamp,
+                            data: result.data as string,
+                            filename: result.filename as string
+                        },
+                        ...prev.slice(0, 11) // Keep only last 12 screenshots
+                    ]);
+                }
+                
+                console.log('Screenshot captured for time tracking:', result.filename);
+                showNotification('📸 Screenshot captured successfully', 'success');
+                return true;
+            } else {
+                console.error('Screenshot capture failed:', result.error);
+                
+                // Show user-friendly error for Electron connection issues
+                if (result.error?.includes('Electron desktop app is not running')) {
+                    showNotification(
+                        '⚠️ Electron desktop app is not running. Please start the app to enable screenshots.', 
+                        'warning'
+                    );
+                } else {
+                    showNotification(`Screenshot capture failed: ${result.error}`, 'error');
+                }
+                return false;
+            }
+        } catch (error) {
+            console.error('Failed to capture screenshot:', error);
+            return false;
+        }
     };
 
 
@@ -1494,7 +1656,7 @@ export default function TimeTrackerPage() {
             // Force timer to restart with corrected base time (excluding idle time)
             // Add small delay to ensure state updates complete before timer restart
             setTimeout(() => {
-                setTimerRestartKey(prev => prev + 1);
+                setTimerRestartKey((prev: number) => prev + 1);
             }, 10);
             
             console.log('🟢 BATCHED RESUME UPDATE COMPLETED - timer corrected to:', actualWorkTime, 'seconds (subtracted', idleDuration, 'idle seconds from', pausedWorkingTime, ')');
@@ -1567,11 +1729,26 @@ export default function TimeTrackerPage() {
                                 Manual Entry
                             </button>
                             <button
-                                onClick={() => setShowIdleSettings(!showIdleSettings)}
+                                onClick={() => setShowIdleSettings(true)}
                                 className="inline-flex items-center px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg transition-colors"
                             >
                                 <FunnelIcon className="h-5 w-5 mr-2" />
                                 Idle Settings
+                            </button>
+                            <button
+                                onClick={() => {
+                                    if (!screenshotConsent) {
+                                        // Show consent dialog first
+                                        const consent = confirm('This feature captures screenshots of your screen for activity monitoring. Do you consent to screen capture? You can disable this at any time.');
+                                        if (consent) {
+                                            setScreenshotConsent(true);
+                                        }
+                                    }
+                                }}
+                                className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-colors"
+                            >
+                                <CameraIcon className="h-5 w-5 mr-2" />
+                                Screenshot Settings
                             </button>
                         </div>
                     </div>
@@ -1666,6 +1843,161 @@ export default function TimeTrackerPage() {
                 </div>
             )}
 
+            {/* Screenshot Settings Panel */}
+            {screenshotConsent && (
+                <div className="bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800">
+                    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                        <div className="flex items-center justify-between">
+                            <div className="flex items-center space-x-4">
+                                <h3 className="text-lg font-medium text-blue-900 dark:text-blue-100">
+                                    Screenshot Monitoring Settings
+                                </h3>
+                                <div className="flex items-center space-x-2">
+                                    <input
+                                        type="checkbox"
+                                        id="screenshotEnabled"
+                                        checked={screenshotSettings.enabled}
+                                        onChange={(e) => setScreenshotSettings((prev: typeof screenshotSettings) => ({ ...prev, enabled: e.target.checked }))}
+                                        className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-blue-300 rounded"
+                                    />
+                                    <label htmlFor="screenshotEnabled" className="text-sm text-blue-700 dark:text-blue-300">
+                                        Enable screenshot capture
+                                    </label>
+                                </div>
+                                {screenshotSettings.enabled && (
+                                    <div className="flex items-center space-x-2">
+                                        <label htmlFor="screenshotInterval" className="text-sm text-blue-700 dark:text-blue-300">
+                                            Capture every:
+                                        </label>
+                                        <select
+                                            id="screenshotInterval"
+                                            value={screenshotSettings.intervalMinutes}
+                                            onChange={(e) => setScreenshotSettings((prev: typeof screenshotSettings) => ({ ...prev, intervalMinutes: parseInt(e.target.value) }))}
+                                            className="block w-20 px-3 py-1 text-sm border border-blue-300 dark:border-blue-600 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                                        >
+                                            <option value="1">1 min</option>
+                                            <option value="5">5 min</option>
+                                            <option value="10">10 min</option>
+                                            <option value="15">15 min</option>
+                                            <option value="30">30 min</option>
+                                        </select>
+                                        <span className="text-sm text-blue-600 dark:text-blue-400">
+                                            (±{screenshotSettings.randomOffsetMinutes === 0.5 ? '30 sec' : screenshotSettings.randomOffsetMinutes + ' min'} random)
+                                        </span>
+                                    </div>
+                                )}
+                            </div>
+                            <button
+                                onClick={() => setScreenshotConsent(false)}
+                                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-200"
+                            >
+                                <XMarkIcon className="h-5 w-5" />
+                            </button>
+                        </div>
+                        <p className="mt-2 text-sm text-blue-700 dark:text-blue-300">
+                            Screenshots are captured periodically for activity monitoring and stored securely. 
+                            You will be notified when screenshots are taken. This feature requires your explicit consent.
+                        </p>
+                        {lastScreenshotTime && (
+                            <p className="text-sm text-blue-600 dark:text-blue-400">
+                                Last screenshot: {new Date(lastScreenshotTime).toLocaleString()}
+                            </p>
+                        )}
+                        <button
+                            onClick={() => {
+                                console.log('🧪 Manual screenshot test triggered');
+                                captureScreenForTracking();
+                            }}
+                            className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded transition-colors mt-2"
+                        >
+                            🧪 Test Screenshot
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {/* Screenshot Gallery */}
+            {screenshotConsent && screenshotSettings.enabled && screenshotHistory.length > 0 && (
+                <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                            📸 Recent Screenshots ({screenshotHistory.length})
+                        </h3>
+                        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+                            {screenshotHistory.map((screenshot, index) => (
+                                <div key={screenshot.timestamp} className="relative group">
+                                    <div className="aspect-video bg-gray-100 dark:bg-gray-700 rounded-lg overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-pointer">
+                                        <img 
+                                            src={screenshot.data} 
+                                            alt={`Screenshot ${index + 1}`}
+                                            className="w-full h-full object-cover"
+                                            onClick={() => {
+                                                // Create a modal or open in new tab
+                                                const newWindow = window.open('', '_blank');
+                                                if (newWindow) {
+                                                    newWindow.document.write(`
+                                                        <html>
+                                                            <head>
+                                                                <title>Screenshot ${index + 1}</title>
+                                                                <style>
+                                                                    body { margin: 0; padding: 20px; background: #1a1a1a; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+                                                                    img { max-width: 100%; max-height: 100vh; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+                                                                </style>
+                                                            </head>
+                                                            <body>
+                                                                <img src="${screenshot.data}" alt="Screenshot ${index + 1}" />
+                                                            </body>
+                                                        </html>
+                                                    `);
+                                                }
+                                            }}
+                                        />
+                                    </div>
+                                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-2 rounded-b-lg">
+                                        <p className="text-xs text-white truncate">
+                                            {new Date(screenshot.timestamp).toLocaleTimeString()}
+                                        </p>
+                                        <p className="text-xs text-gray-300 truncate">
+                                            {screenshot.filename.split('-').pop()?.replace('.png', '')}
+                                        </p>
+                                    </div>
+                                    <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                            onClick={() => {
+                                                // Download screenshot
+                                                const link = document.createElement('a');
+                                                link.download = screenshot.filename;
+                                                link.href = screenshot.data;
+                                                link.click();
+                                            }}
+                                            className="bg-white/90 hover:bg-white text-gray-800 rounded-full p-1.5 shadow-lg"
+                                            title="Download screenshot"
+                                        >
+                                            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                        <div className="mt-4 text-center">
+                            <button
+                                onClick={() => {
+                                    if (confirm('Clear all screenshot history? This cannot be undone.')) {
+                                        setScreenshotHistory([]);
+                                        showNotification('Screenshot history cleared', 'success');
+                                    }
+                                }}
+                                className="text-sm text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300"
+                            >
+                                Clear History
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
                 {viewMode === 'dashboard' && (
                     <div className="space-y-6">
@@ -1750,7 +2082,7 @@ export default function TimeTrackerPage() {
                                                         ? 'text-orange-600 dark:text-orange-400'
                                                         : 'text-gray-500 dark:text-gray-400'
                                                 }`}>
-                                                {formatTime(elapsed)}
+                                                {formatTime(displayTime)}
                                             </div>
 
                                             {/* Status indicator */}
@@ -2419,7 +2751,7 @@ export default function TimeTrackerPage() {
                                 <input
                                     type="date"
                                     value={manualEntry.date}
-                                    onChange={(e) => setManualEntry({ ...manualEntry, date: e.target.value })}
+                                    onChange={(e) => setManualEntry((prev: typeof manualEntry) => ({ ...prev, date: e.target.value }))}
                                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                                 />
                             </div>
@@ -2432,7 +2764,7 @@ export default function TimeTrackerPage() {
                                     <input
                                         type="time"
                                         value={manualEntry.startTime}
-                                        onChange={(e) => setManualEntry({ ...manualEntry, startTime: e.target.value })}
+                                        onChange={(e) => setManualEntry((prev: typeof manualEntry) => ({ ...prev, startTime: e.target.value }))}
                                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                                     />
                                 </div>
@@ -2443,7 +2775,7 @@ export default function TimeTrackerPage() {
                                     <input
                                         type="time"
                                         value={manualEntry.endTime}
-                                        onChange={(e) => setManualEntry({ ...manualEntry, endTime: e.target.value })}
+                                        onChange={(e) => setManualEntry((prev: typeof manualEntry) => ({ ...prev, endTime: e.target.value }))}
                                         className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                                     />
                                 </div>
@@ -2455,7 +2787,7 @@ export default function TimeTrackerPage() {
                                 </label>
                                 <select
                                     value={manualEntry.projectId}
-                                    onChange={(e) => setManualEntry({ ...manualEntry, projectId: e.target.value })}
+                                    onChange={(e) => setManualEntry((prev: typeof manualEntry) => ({ ...prev, projectId: e.target.value }))}
                                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
                                 >
                                     <option value="">Select a project...</option>
@@ -2473,7 +2805,7 @@ export default function TimeTrackerPage() {
                                 </label>
                                 <textarea
                                     value={manualEntry.description}
-                                    onChange={(e) => setManualEntry({ ...manualEntry, description: e.target.value })}
+                                    onChange={(e) => setManualEntry((prev: typeof manualEntry) => ({ ...prev, description: e.target.value }))}
                                     rows={3}
                                     placeholder="Describe your work..."
                                     className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
@@ -2662,6 +2994,64 @@ export default function TimeTrackerPage() {
                                 <button
                                     onClick={() => setShowIdleNotification(false)}
                                     className="inline-flex text-orange-400 hover:text-orange-600 focus:outline-none"
+                                >
+                                    <span className="sr-only">Dismiss</span>
+                                    <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* General Notification Toast */}
+            {notification && (
+                <div className="fixed bottom-4 right-4 z-50 animate-pulse">
+                    <div className={`
+                        border-l-4 p-4 rounded-lg shadow-lg max-w-sm
+                        ${notification.type === 'success' ? 'bg-green-50 border-green-400' : 
+                          notification.type === 'error' ? 'bg-red-50 border-red-400' : 
+                          'bg-yellow-50 border-yellow-400'}
+                    `}>
+                        <div className="flex items-center">
+                            <div className="flex-shrink-0">
+                                {notification.type === 'success' && (
+                                    <svg className="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                    </svg>
+                                )}
+                                {notification.type === 'error' && (
+                                    <svg className="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                    </svg>
+                                )}
+                                {notification.type === 'warning' && (
+                                    <svg className="h-5 w-5 text-yellow-400" viewBox="0 0 20 20" fill="currentColor">
+                                        <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+                                    </svg>
+                                )}
+                            </div>
+                            <div className="ml-3">
+                                <p className={`
+                                    text-sm font-medium
+                                    ${notification.type === 'success' ? 'text-green-800' : 
+                                      notification.type === 'error' ? 'text-red-800' : 
+                                      'text-yellow-800'}
+                                `}>
+                                    {notification.message}
+                                </p>
+                            </div>
+                            <div className="ml-auto pl-3">
+                                <button
+                                    onClick={() => setNotification(null)}
+                                    className={`
+                                        inline-flex focus:outline-none
+                                        ${notification.type === 'success' ? 'text-green-400 hover:text-green-600' : 
+                                          notification.type === 'error' ? 'text-red-400 hover:text-red-600' : 
+                                          'text-yellow-400 hover:text-yellow-600'}
+                                    `}
                                 >
                                     <span className="sr-only">Dismiss</span>
                                     <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">

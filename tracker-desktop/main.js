@@ -1,9 +1,10 @@
-const { app, BrowserWindow, powerMonitor, ipcMain, Notification } = require('electron');
+const { app, BrowserWindow, powerMonitor, ipcMain, Notification, desktopCapturer } = require('electron');
 const path = require('path');
 const fetch = require('node-fetch');
 const Store = require('electron-store');
 const http = require('http');
 const url = require('url');
+const fs = require('fs');
 
 const store = new Store();
 
@@ -69,6 +70,61 @@ function showSystemNotification(title, body, icon = null) {
   notification.show();
   console.log(`System notification shown: ${title} - ${body}`);
   return true;
+}
+
+async function captureScreen() {
+  try {
+    // Get all available screen sources
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: { width: 1920, height: 1080 }
+    });
+
+    if (sources.length === 0) {
+      throw new Error('No screen sources found');
+    }
+
+    // Get the primary screen (usually the first one)
+    const primaryScreen = sources[0];
+    
+    // Convert thumbnail to PNG buffer
+    const screenshotBuffer = primaryScreen.thumbnail.toPNG();
+    
+    // Create timestamp for filename
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `screenshot-${timestamp}.png`;
+    
+    // Save to a screenshots directory
+    const screenshotsDir = path.join(app.getPath('userData'), 'screenshots');
+    if (!fs.existsSync(screenshotsDir)) {
+      fs.mkdirSync(screenshotsDir, { recursive: true });
+    }
+    
+    const filepath = path.join(screenshotsDir, filename);
+    fs.writeFileSync(filepath, screenshotBuffer);
+    
+    console.log(`Screenshot saved to: ${filepath}`);
+    
+    // Convert buffer to base64 for browser display
+    const base64Data = screenshotBuffer.toString('base64');
+    const dataUrl = `data:image/png;base64,${base64Data}`;
+    
+    return {
+      success: true,
+      filepath: filepath,
+      filename: filename,
+      timestamp: timestamp,
+      size: screenshotBuffer.length,
+      data: dataUrl
+    };
+    
+  } catch (error) {
+    console.error('Failed to capture screen:', error);
+    return {
+      success: false,
+      error: error.message
+    };
+  }
 }
 
 // Create HTTP server for browser communication
@@ -152,6 +208,43 @@ function createHttpServer() {
           showSystemNotification(data.title, data.body, data.icon);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: true }));
+        } catch (error) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ success: false, error: error.message }));
+        }
+      });
+    } else if (path === '/capture-screenshot' && req.method === 'POST') {
+      let body = '';
+      req.on('data', chunk => { body += chunk.toString(); });
+      req.on('end', async () => {
+        try {
+          const data = JSON.parse(body);
+          
+          // Check consent before capturing screenshot
+          if (!data.consent || data.consent !== true) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+              success: false, 
+              error: 'Screenshot capture requires explicit consent' 
+            }));
+            return;
+          }
+          
+          // Capture screenshot
+          const result = await captureScreen();
+          
+          if (result.success) {
+            // Show notification that screenshot was taken
+            showSystemNotification(
+              'Activity Monitor', 
+              'Screenshot captured for time tracking',
+              null
+            );
+          }
+          
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+          
         } catch (error) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ success: false, error: error.message }));

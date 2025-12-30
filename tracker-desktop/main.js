@@ -252,6 +252,10 @@ function createHttpServer() {
           res.end(JSON.stringify({ success: false, error: error.message }));
         }
       });
+    } else if (path === '/' && req.method === 'GET') {
+      // Default route to show Electron is running
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('Electron is running on port ' + ELECTRON_PORT);
     } else {
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Not found' }));

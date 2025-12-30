@@ -126,6 +126,8 @@ export default function TimeTrackerPage() {
     });
     const [lastScreenshotTime, setLastScreenshotTime] = useState<number | null>(null);
     const [screenshotHistory, setScreenshotHistory] = useState<Array<{timestamp: number; data: string; filename: string}>>([]);
+    const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
+    const lastScreenshotTimeRef = useRef<number | null>(null);
 
     // Apollo Client for cache management
     const client = useApolloClient();
@@ -384,8 +386,9 @@ export default function TimeTrackerPage() {
             
             // Set initial screenshot time when timer starts (to prevent immediate capture)
             if (screenshotSettings.enabled && screenshotConsent) {
-                setLastScreenshotTime(Date.now());
-                console.log('📸 Initial screenshot time set to prevent immediate capture');
+                const initialTime = Date.now();
+                setLastScreenshotTime(initialTime);
+                lastScreenshotTimeRef.current = initialTime;
             }
             
             // Add delay before refetch to let backend process
@@ -576,29 +579,19 @@ export default function TimeTrackerPage() {
                     // Listen for activity status updates via SSE
                     const unsubscribe = browserElectronService.onActivityStatus(async (data) => {
                         try {
-                            console.log('📨 Activity status from Electron:', data);
                             setActivityStatus(data);
 
                         // Use persistent cache reference to avoid React re-mount issues
                         // Fallback to GraphQL activeEntry if cache is empty
                         const currentActiveEntry = persistentCacheRef.current || cachedActiveEntry || activeEntry;
-                        console.log('💰 Using persistent cache for activity handling');
-                        console.log('💰 persistentCacheRef:', persistentCacheRef.current);
-                        console.log('💰 cachedActiveEntry state:', cachedActiveEntry);
-                        console.log('💰 GraphQL activeEntry:', !!activeEntry);
-                        console.log('💰 Final currentActiveEntry:', currentActiveEntry);
 
                         // Handle activity changes with persistent cached activeEntry
-                        console.log('🔍 Activity check - data.type:', data.type, 'currentActiveEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPausedRef.current);
                         
                         if (data.type === 'IDLE' && currentActiveEntry) {
                             // User went idle - pause the timer
-                            console.log('🔴 IDLE detected, pausing timer. cachedEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPausedRef.current);
-                            console.log('🔴 About to call handleTimerPause()');
                             
                             // IMMEDIATELY stop the timer interval to prevent any further counting
                             if (timerIntervalRef.current) {
-                                console.log('🛑 EMERGENCY STOP: Clearing timer interval immediately on IDLE detection');
                                 clearInterval(timerIntervalRef.current);
                                 timerIntervalRef.current = null;
                             }
@@ -671,20 +664,16 @@ export default function TimeTrackerPage() {
 
                         // Listen for activity status updates from Electron
                         electronService.onActivityStatus((data) => {
-                            console.log('📨 Activity status from Electron:', data);
                             setActivityStatus(data);
 
                             // Handle activity changes with persistent cache to ensure consistency
                             const currentActiveEntry = persistentCacheRef.current || cachedActiveEntry || activeEntry;
-                            console.log('🔍 IPC Activity check - data.type:', data.type, 'currentActiveEntry:', !!currentActiveEntry, 'isTimerPaused:', isTimerPaused);
                             
                             if (data.type === 'IDLE' && currentActiveEntry) {
                                 // User went idle - stop the timer
-                                console.log('🔴 IPC IDLE detected, pausing timer');
                                 
                                 // IMMEDIATELY stop the timer interval to prevent any further counting
                                 if (timerIntervalRef.current) {
-                                    console.log('🛑 EMERGENCY STOP (IPC): Clearing timer interval immediately on IDLE detection');
                                     clearInterval(timerIntervalRef.current);
                                     timerIntervalRef.current = null;
                                 }
@@ -1061,32 +1050,33 @@ export default function TimeTrackerPage() {
                 console.log('⏱️ Timer working (ref-based):', currentElapsed, 'seconds elapsed (ref:', actualElapsedRef.current, ')');
             }
             
-            // Check for screenshot capture every second if enabled
-            if (currentElapsed % 10 === 0) {
-                console.log('📸 Screenshot status check - enabled:', screenshotSettings.enabled, 'consent:', screenshotConsent, 'lastScreenshotTime:', lastScreenshotTime);
-            }
+
             
             if (screenshotSettings.enabled && screenshotConsent) {
                 const now = Date.now();
                 const intervalMs = screenshotSettings.intervalMinutes * 60 * 1000;
                 const offsetMs = (Math.random() * 2 - 1) * screenshotSettings.randomOffsetMinutes * 60 * 1000;
                 const effectiveInterval = intervalMs + offsetMs;
-                const timeSinceLast = lastScreenshotTime ? now - lastScreenshotTime : 0;
+                // Use ref for immediate timestamp checking to avoid race conditions
+                const lastScreenshotTimeImmediate = lastScreenshotTimeRef.current || lastScreenshotTime;
+                const timeSinceLast = lastScreenshotTimeImmediate ? now - lastScreenshotTimeImmediate : 0;
                 
-                // Log every 10 seconds to show screenshot status
-                if (currentElapsed % 10 === 0) {
-                    console.log('📸 Screenshot check - enabled:', screenshotSettings.enabled, 'consent:', screenshotConsent, 'intervalMs:', intervalMs, 'timeSinceLast:', timeSinceLast, 'effectiveInterval:', effectiveInterval);
-                    console.log('📸 Screenshot panel visibility - screenshotConsent state:', screenshotConsent);
-                }
+
                 
-                // Only trigger if we have a lastScreenshotTime and enough time has passed
-                if (lastScreenshotTime && timeSinceLast >= effectiveInterval) {
-                    console.log('📸 Screenshot trigger - intervalMs:', intervalMs, 'effectiveInterval:', effectiveInterval, 'timeSinceLast:', timeSinceLast);
+                // Only trigger if enough time has passed since last screenshot and we're not already capturing
+                if (lastScreenshotTimeImmediate && timeSinceLast >= effectiveInterval && !isCapturingScreenshot) {
+                    console.log('📸 Screenshot captured (10 min interval)');
+                    
+                    // Update lastScreenshotTime immediately to prevent multiple triggers
+                    const triggerTime = Date.now();
+                    setLastScreenshotTime(triggerTime);
+                    lastScreenshotTimeRef.current = triggerTime; // Immediate ref update
+                    
                     captureScreenForTracking();
-                } else {
-                    // Log why we're not capturing (for debugging)
-                    if (currentElapsed % 30 === 0) { // Log every 30 seconds to reduce spam
-                        console.log('⏸️ Skipping screenshot - timeSinceLast:', Math.round(timeSinceLast / 1000), 's < effectiveInterval:', Math.round(effectiveInterval / 1000), 's');
+                } else if (isCapturingScreenshot) {
+                    // Keep this warning as it's useful for debugging
+                    if (currentElapsed % 60 === 0) { // Log every minute only
+                        console.log('⏸️ Screenshot capture in progress - skipping');
                     }
                 }
             }
@@ -1238,11 +1228,29 @@ export default function TimeTrackerPage() {
             return false;
         }
 
+        // Prevent multiple simultaneous captures
+        if (isCapturingScreenshot) {
+            console.log('⏸️ Already capturing screenshot - ignoring request');
+            return false;
+        }
+
+        // Check if Electron service is available
+        if (!await browserElectronService.isElectronAvailable()) {
+            showNotification('⚠️ Electron server is not running', 'warning');
+            return false;
+        }
+
+        // Set capturing flag to prevent multiple simultaneous captures
+        setIsCapturingScreenshot(true);
+
         try {
+            console.log('🔍 About to call captureScreenshot - Electron service available:', await browserElectronService.isElectronAvailable());
             const result = await browserElectronService.captureScreenshot(true);
+            console.log('🔍 captureScreenshot result:', result);
+            
             if (result.success && result.filename) {
                 const timestamp = Date.now();
-                setLastScreenshotTime(timestamp);
+                // Note: lastScreenshotTime is already set when trigger was called
                 
                 // Add to screenshot history with base64 data
                 if (result.data && result.filename) {
@@ -1256,8 +1264,9 @@ export default function TimeTrackerPage() {
                     ]);
                 }
                 
-                console.log('Screenshot captured for time tracking:', result.filename);
+                console.log('✅ Screenshot captured for time tracking:', result.filename);
                 showNotification('📸 Screenshot captured successfully', 'success');
+                setIsCapturingScreenshot(false);
                 return true;
             } else {
                 console.error('Screenshot capture failed:', result.error);
@@ -1271,11 +1280,21 @@ export default function TimeTrackerPage() {
                 } else {
                     showNotification(`Screenshot capture failed: ${result.error}`, 'error');
                 }
+                setIsCapturingScreenshot(false);
                 return false;
             }
         } catch (error) {
-            console.error('Failed to capture screenshot:', error);
+            console.error('❌ Failed to capture screenshot for time tracking:', error);
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            if (errorMessage.includes('Electron service not available')) {
+                showNotification('⚠️ Electron server is not running', 'warning');
+            } else {
+                showNotification('❌ Failed to capture screenshot for time tracking', 'error');
+            }
             return false;
+        } finally {
+            // Always clear the capturing flag
+            setIsCapturingScreenshot(false);
         }
     };
 

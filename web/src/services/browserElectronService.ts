@@ -243,6 +243,12 @@ class BrowserElectronService {
     return this.isAvailable;
   }
 
+  // Public method to check Electron service availability
+  async isElectronAvailable(): Promise<boolean> {
+    await this.checkAvailability();
+    return this.isAvailable;
+  }
+
   async showNotification(title: string, body: string, icon?: string): Promise<{ success: boolean }> {
     if (!this.isAvailable) {
       console.warn('Electron service not available, falling back to browser notification');

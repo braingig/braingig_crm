@@ -1,10 +1,14 @@
 {
   "name": "company-tracker",
   "version": "1.0.0",
-  "main": "main.js",
+  "description": "Employee activity tracking desktop application",
+  "author": "Your Company",
+  "main": "index.js",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder"
+    "build": "electron-builder",
+    "build:win": "electron-builder --win",
+    "build:win-simple": "electron-builder --win --x64 --publish=never"
   },
   "dependencies": {
     "electron-store": "^8.1.0",
@@ -12,7 +16,8 @@
   },
   "devDependencies": {
     "electron": "^30.0.0",
-    "electron-builder": "^24.9.1"
+    "electron-builder": "^24.9.1",
+    "electron-packager": "^17.1.2"
   },
   "build": {
     "appId": "com.company.tracker",
@@ -20,9 +25,24 @@
     "directories": {
       "output": "dist"
     },
-    "files": ["**/*"],
-    "win": { "target": "nsis" },
-    "mac": { "target": "dmg" },
-    "linux": { "target": "AppImage" }
+    "files": [
+      "**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   }
 }

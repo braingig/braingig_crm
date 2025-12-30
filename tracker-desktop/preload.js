@@ -25,6 +25,9 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.removeAllListeners(channel);
   },
 
+  // Screenshot functionality
+  captureScreen: (consent) => ipcRenderer.invoke('capture-screen', consent),
+  
   // Platform info
   platform: process.platform
 });

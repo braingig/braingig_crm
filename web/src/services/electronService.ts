@@ -13,6 +13,15 @@ interface ElectronAPI {
   setAuthToken: (token: string) => Promise<{ success: boolean }>;
   onActivityStatus: (callback: (data: any) => void) => void;
   removeAllListeners: (channel: string) => void;
+  captureScreen: (consent: boolean) => Promise<{
+    success: boolean;
+    filepath?: string;
+    filename?: string;
+    timestamp?: string;
+    size?: number;
+    data?: string;
+    error?: string;
+  }>;
   platform: string;
 }
 
@@ -107,6 +116,28 @@ class ElectronService {
     if (this.electronAPI && this.activityCallback) {
       this.electronAPI.removeAllListeners('activity-status');
       this.activityCallback = null;
+    }
+  }
+
+  async captureScreen(consent: boolean = true): Promise<{
+    success: boolean;
+    filepath?: string;
+    filename?: string;
+    timestamp?: string;
+    size?: number;
+    data?: string;
+    error?: string;
+  } | null> {
+    if (!this.electronAPI) return null;
+    
+    try {
+      return await this.electronAPI.captureScreen(consent);
+    } catch (error) {
+      console.error('Failed to capture screen:', error);
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
     }
   }
 }

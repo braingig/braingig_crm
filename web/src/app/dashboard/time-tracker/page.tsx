@@ -125,7 +125,21 @@ export default function TimeTrackerPage() {
         };
     });
     const [lastScreenshotTime, setLastScreenshotTime] = useState<number | null>(null);
-    const [screenshotHistory, setScreenshotHistory] = useState<Array<{timestamp: number; data: string; filename: string}>>([]);
+    const [screenshotHistory, setScreenshotHistory] = useState<Array<{timestamp: number; data: string; filename: string}>>(() => {
+        if (typeof window !== 'undefined') {
+            try {
+                const stored = localStorage.getItem('screenshotHistory');
+                if (stored) {
+                    const parsed = JSON.parse(stored);
+                    // Limit history to last 50 screenshots to prevent storage issues
+                    return Array.isArray(parsed) ? parsed.slice(-50) : [];
+                }
+            } catch (error) {
+                console.error('Error loading screenshot history:', error);
+            }
+        }
+        return [];
+    });
     const [isCapturingScreenshot, setIsCapturingScreenshot] = useState(false);
     const lastScreenshotTimeRef = useRef<number | null>(null);
 
@@ -753,6 +767,27 @@ export default function TimeTrackerPage() {
         }
     }, [screenshotSettings]);
 
+    // Effect to persist screenshot history to localStorage
+    useEffect(() => {
+        if (typeof window !== 'undefined' && screenshotHistory.length > 0) {
+            try {
+                // Limit to last 50 screenshots to prevent storage issues
+                const limitedHistory = screenshotHistory.slice(-50);
+                localStorage.setItem('screenshotHistory', JSON.stringify(limitedHistory));
+            } catch (error) {
+                console.error('Error saving screenshot history:', error);
+                // If storage is full, clear older entries
+                try {
+                    const reducedHistory = screenshotHistory.slice(-20);
+                    localStorage.setItem('screenshotHistory', JSON.stringify(reducedHistory));
+                } catch (error2) {
+                    console.error('Error saving reduced screenshot history:', error2);
+                    localStorage.removeItem('screenshotHistory');
+                }
+            }
+        }
+    }, [screenshotHistory]);
+
     // Sync display time with actual elapsed ref
     useEffect(() => {
         const interval = setInterval(() => {
@@ -1064,7 +1099,20 @@ export default function TimeTrackerPage() {
 
                 
                 // Only trigger if enough time has passed since last screenshot and we're not already capturing
-                if (lastScreenshotTimeImmediate && timeSinceLast >= effectiveInterval && !isCapturingScreenshot) {
+                // For first time (no previous screenshot), trigger after 10 minutes from timer start
+                const shouldTrigger = lastScreenshotTimeImmediate 
+                    ? timeSinceLast >= effectiveInterval 
+                    : currentElapsed >= effectiveInterval / 1000; // Convert to seconds for comparison
+                    
+                // Debug logging every 30 seconds to track screenshot timing
+                if (currentElapsed % 30 === 0) {
+                    const minutesElapsed = (currentElapsed / 60).toFixed(1);
+                    const intervalMinutes = (effectiveInterval / 1000 / 60).toFixed(1);
+                    const timeSinceLastMinutes = lastScreenshotTimeImmediate ? (timeSinceLast / 1000 / 60).toFixed(1) : 'N/A';
+                    console.log(`📸 Screenshot Check - Elapsed: ${minutesElapsed}min, Interval: ${intervalMinutes}min, Since last: ${timeSinceLastMinutes}min, Should trigger: ${shouldTrigger}`);
+                }
+                    
+                if (shouldTrigger && !isCapturingScreenshot) {
                     console.log('📸 Screenshot captured (10 min interval)');
                     
                     // Update lastScreenshotTime immediately to prevent multiple triggers
@@ -1234,21 +1282,37 @@ export default function TimeTrackerPage() {
             return false;
         }
 
-        // Check if Electron service is available
-        if (!await browserElectronService.isElectronAvailable()) {
-            showNotification('⚠️ Electron server is not running', 'warning');
-            return false;
-        }
-
         // Set capturing flag to prevent multiple simultaneous captures
         setIsCapturingScreenshot(true);
 
         try {
-            console.log('🔍 About to call captureScreenshot - Electron service available:', await browserElectronService.isElectronAvailable());
-            const result = await browserElectronService.captureScreenshot(true);
+            let result: {
+                success: boolean;
+                filepath?: string | undefined;
+                filename?: string | undefined;
+                timestamp?: string | undefined;
+                size?: number | undefined;
+                data?: string | undefined;
+                error?: string | undefined;
+            } | null = null;
+            
+            // Use direct IPC if running in Electron, otherwise use HTTP service
+            if (electronService.isRunningInElectron) {
+                console.log('🖥️ Using Electron IPC for screenshot capture');
+                result = await electronService.captureScreen(true);
+            } else {
+                console.log('🌐 Using HTTP service for screenshot capture');
+                // Check if Electron service is available
+                if (!await browserElectronService.isElectronAvailable()) {
+                    showNotification('⚠️ Electron server is not running', 'warning');
+                    return false;
+                }
+                result = await browserElectronService.captureScreenshot(true);
+            }
+            
             console.log('🔍 captureScreenshot result:', result);
             
-            if (result.success && result.filename) {
+            if (result && result.success && result.filename) {
                 const timestamp = Date.now();
                 // Note: lastScreenshotTime is already set when trigger was called
                 
@@ -1269,16 +1333,16 @@ export default function TimeTrackerPage() {
                 setIsCapturingScreenshot(false);
                 return true;
             } else {
-                console.error('Screenshot capture failed:', result.error);
+                console.error('Screenshot capture failed:', result?.error || 'Unknown error');
                 
                 // Show user-friendly error for Electron connection issues
-                if (result.error?.includes('Electron desktop app is not running')) {
+                if (result?.error?.includes('Electron desktop app is not running')) {
                     showNotification(
                         '⚠️ Electron desktop app is not running. Please start the app to enable screenshots.', 
                         'warning'
                     );
                 } else {
-                    showNotification(`Screenshot capture failed: ${result.error}`, 'error');
+                    showNotification(`Screenshot capture failed: ${result?.error || 'Unknown error'}`, 'error');
                 }
                 setIsCapturingScreenshot(false);
                 return false;
@@ -2005,6 +2069,10 @@ export default function TimeTrackerPage() {
                                 onClick={() => {
                                     if (confirm('Clear all screenshot history? This cannot be undone.')) {
                                         setScreenshotHistory([]);
+                                        // Clear from localStorage as well
+                                        if (typeof window !== 'undefined') {
+                                            localStorage.removeItem('screenshotHistory');
+                                        }
                                         showNotification('Screenshot history cleared', 'success');
                                     }
                                 }}

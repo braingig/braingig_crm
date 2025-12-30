@@ -54,8 +54,10 @@ function showSystemNotification(title, body, icon = null) {
     body: body,
     icon: icon || null,
     silent: false,
-    urgency: 'normal',
-    timeoutType: 'default'
+    urgency: 'critical', // Use 'critical' for higher visibility
+    timeoutType: 'default',
+    requireInteraction: true, // Keep notification visible until user interacts
+    showWhen: true // Show timestamp
   });
 
   notification.on('click', () => {
@@ -236,8 +238,8 @@ function createHttpServer() {
           if (result.success) {
             // Show notification that screenshot was taken
             showSystemNotification(
-              'Activity Monitor', 
-              'Screenshot captured for time tracking',
+              '📸 SCREENSHOT CAPTURED', 
+              `Time tracking screenshot captured at ${new Date().toLocaleTimeString()}`,
               null
             );
           }
@@ -429,6 +431,30 @@ ipcMain.handle('get-activity-status', async (event) => {
 ipcMain.handle('set-auth-token', async (event, token) => {
   store.set('token', token);
   return { success: true };
+});
+
+ipcMain.handle('capture-screen', async (event, consent) => {
+  // Check consent before capturing screenshot
+  if (!consent || consent !== true) {
+    return {
+      success: false,
+      error: 'Screenshot capture requires explicit consent'
+    };
+  }
+  
+  // Capture screenshot
+  const result = await captureScreen();
+  
+  if (result.success) {
+    // Show system notification that screenshot was taken
+    showSystemNotification(
+      '📸 SCREENSHOT CAPTURED', 
+      `Time tracking screenshot captured at ${new Date().toLocaleTimeString()}`,
+      null
+    );
+  }
+  
+  return result;
 });
 
 // Enhanced activity monitoring with mouse and keyboard hooks

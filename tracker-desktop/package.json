@@ -11,8 +11,7 @@
     "build:win-simple": "electron-builder --win --x64 --publish=never"
   },
   "dependencies": {
-    "electron-store": "^8.1.0",
-    "node-fetch": "^3.3.2"
+    "electron-store": "^8.1.0"
   },
   "devDependencies": {
     "electron": "^30.0.0",

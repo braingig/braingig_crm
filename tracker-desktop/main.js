@@ -1,6 +1,5 @@
 const { app, BrowserWindow, powerMonitor, ipcMain, Notification, desktopCapturer } = require('electron');
 const path = require('path');
-const fetch = require('node-fetch');
 const Store = require('electron-store');
 const http = require('http');
 const url = require('url');
@@ -286,65 +285,88 @@ function notifyBrowserClients(data) {
 async function reportActivity(type, metadata = {}) {
   if (!isTrackingEnabled || !currentUserId) return;
 
-  try {
-    const response = await fetch(API_URL, {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify({
+      query: `
+        mutation ReportActivity($type: String!, $metadata: JSON) {
+          reportActivity(type: $type, metadata: $metadata)
+        }
+      `,
+      variables: { 
+        type,
+        metadata: {
+          ...metadata,
+          timestamp: new Date().toISOString(),
+          source: 'electron-desktop'
+        }
+      }
+    });
+
+    const options = {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${store.get('token')}`
-      },
-      body: JSON.stringify({
-        query: `
-          mutation ReportActivity($type: String!, $metadata: JSON) {
-            reportActivity(type: $type, metadata: $metadata)
-          }
-        `,
-        variables: { 
-          type,
-          metadata: {
-            ...metadata,
-            timestamp: new Date().toISOString(),
-            source: 'electron-desktop'
-          }
-        }
-      })
-    });
+        'Authorization': `Bearer ${store.get('token')}`,
+        'Content-Length': Buffer.byteLength(postData)
+      }
+    };
 
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
+    const req = http.request(API_URL, options, (res) => {
+      let data = '';
 
-    const result = await response.json();
-    
-    // Send activity status to renderer process
-    console.log(`Sending IPC event 'activity-status' with type: ${type}`);
-    if (mainWindow && mainWindow.webContents) {
-      mainWindow.webContents.send('activity-status', {
-        type,
-        idleTime: powerMonitor.getSystemIdleTime(),
-        timestamp: Date.now()
+      res.on('data', (chunk) => {
+        data += chunk;
       });
-      console.log('IPC event sent successfully');
-    } else {
-      console.log('Cannot send IPC event - mainWindow or webContents not available');
-    }
 
-    // Also send to any connected browser clients via Server-Sent Events
-    notifyBrowserClients({
-      type,
-      idleTime: powerMonitor.getSystemIdleTime(),
-      timestamp: Date.now()
+      res.on('end', () => {
+        try {
+          const result = JSON.parse(data);
+          
+          if (res.statusCode !== 200) {
+            throw new Error(`HTTP error! status: ${res.statusCode}`);
+          }
+          
+          // Send activity status to renderer process
+          console.log(`Sending IPC event 'activity-status' with type: ${type}`);
+          if (mainWindow && mainWindow.webContents) {
+            mainWindow.webContents.send('activity-status', {
+              type,
+              idleTime: powerMonitor.getSystemIdleTime(),
+              timestamp: Date.now()
+            });
+            console.log('IPC event sent successfully');
+          } else {
+            console.log('Cannot send IPC event - mainWindow or webContents not available');
+          }
+
+          // Also send to any connected browser clients via Server-Sent Events
+          notifyBrowserClients({
+            type,
+            idleTime: powerMonitor.getSystemIdleTime(),
+            timestamp: Date.now()
+          });
+
+          resolve(result);
+        } catch (parseError) {
+          reject(parseError);
+        }
+      });
     });
 
-    return result;
-  } catch (error) {
-    console.error('Activity report failed:', error.message);
-    
-    // If unauthorized, stop tracking
-    if (error.message.includes('401') || error.message.includes('Unauthorized')) {
-      stopActivityTracking();
-    }
-  }
+    req.on('error', (error) => {
+      console.error('Activity report failed:', error.message);
+      
+      // If unauthorized, stop tracking
+      if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+        stopActivityTracking();
+      }
+      
+      reject(error);
+    });
+
+    req.write(postData);
+    req.end();
+  });
 }
 
 function startActivityTracking(userId, token = null) {
